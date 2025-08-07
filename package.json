@@ -1,15 +1,20 @@
 {
   "name": "visualizacion-barrios",
   "version": "1.0.0",
-  "description": "Mapa coroplético de barrios de CABA para Looker Studio",
+  "description": "Mapa coropl\u00e9tico de barrios de CABA para Looker Studio",
   "main": "dist/Visualization.js",
   "scripts": {
-"build": "esbuild src/Visualization.js --bundle --outfile=dist/Visualization.js --format=iife --minify --loader:.css=text --external:@google/dscc"
+    "build": "esbuild src/Visualization.js --bundle --platform=browser --target=es2018 --outfile=dist/Visualization.js --format=iife --minify --loader:.css=text",
+    "deploy": "npm run build && gsutil cp dist/Visualization.js gs://mapa-barrios-degcba/dist/Visualization.js",
+    "deploy:meta": "gsutil -m setmeta -h \"Content-Type: application/json\" gs://mapa-barrios-degcba/Config.json gs://mapa-barrios-degcba/manifest.json && gsutil -m setmeta -h \"Content-Type: application/geo+json\" gs://mapa-barrios-degcba/barrioscaba.geojson",
+    "deploy:assets": "gsutil -m cp Config.json gs://mapa-barrios-degcba/Config.json && gsutil -m cp manifest.json gs://mapa-barrios-degcba/manifest.json",
+    "deploy:geojson": "gsutil cp barrioscaba.geojson gs://mapa-barrios-degcba/barrioscaba.geojson",
+    "deploy:all": "npm run deploy && npm run deploy:assets && npm run deploy:geojson && npm run deploy:meta"
   },
   "dependencies": {
     "leaflet": "^1.9.4"
   },
   "devDependencies": {
-    "esbuild": "^0.19.11"
+    "esbuild": "^0.25.8"
   }
 }
