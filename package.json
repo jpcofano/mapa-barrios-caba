@@ -1,15 +1,22 @@
 {
   "name": "visualizacion-barrios",
   "version": "1.0.0",
-  "description": "Mapa coropl\u00e9tico de barrios de CABA para Looker Studio",
+  "description": "Mapa coroplético de barrios de CABA para Looker Studio",
   "main": "dist/Visualization.js",
   "scripts": {
     "build": "esbuild src/Visualization.js --bundle --platform=browser --target=es2018 --outfile=dist/Visualization.js --format=iife --minify --loader:.css=text",
-    "deploy": "npm run build && gsutil cp dist/Visualization.js gs://mapa-barrios-degcba/dist/Visualization.js",
-    "deploy:meta": "gsutil -m setmeta -h \"Content-Type: application/json\" gs://mapa-barrios-degcba/Config.json gs://mapa-barrios-degcba/manifest.json && gsutil -m setmeta -h \"Content-Type: application/geo+json\" gs://mapa-barrios-degcba/barrioscaba.geojson",
-    "deploy:assets": "gsutil -m cp Config.json gs://mapa-barrios-degcba/Config.json && gsutil -m cp manifest.json gs://mapa-barrios-degcba/manifest.json",
-    "deploy:geojson": "gsutil cp barrioscaba.geojson gs://mapa-barrios-degcba/barrioscaba.geojson",
-    "deploy:all": "npm run deploy && npm run deploy:assets && npm run deploy:geojson && npm run deploy:meta"
+
+    "deploy:js": "npm run build && gsutil -h \"Content-Type: application/javascript\" -h \"Cache-Control: no-store\" cp dist/Visualization.js gs://mapa-barrios-degcba/dist/Visualization.js",
+
+    "deploy:assets": "gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp Config.json gs://mapa-barrios-degcba/Config.json && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp manifest.json gs://mapa-barrios-degcba/manifest.json",
+
+    "deploy:geojson": "gsutil -h \"Content-Type: application/geo+json\" -h \"Cache-Control: no-store\" cp barrioscaba.geojson gs://mapa-barrios-degcba/barrioscaba.geojson",
+
+    "deploy:cors": "gsutil cors set cors.json gs://mapa-barrios-degcba",
+
+    "deploy": "npm run deploy:js",
+
+    "deploy:all": "npm run deploy:js && npm run deploy:assets && npm run deploy:geojson && npm run deploy:cors"
   },
   "dependencies": {
     "leaflet": "^1.9.4"
