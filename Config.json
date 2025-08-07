@@ -1,0 +1,58 @@
+{
+  "data": [
+    {
+      "id": "mainData",
+      "label": "Datos del Mapa",
+      "elements": [
+        {
+          "id": "barrio",
+          "label": "Barrio",
+          "type": "DIMENSION"
+        },
+        {
+          "id": "valor",
+          "label": "Valor",
+          "type": "METRIC"
+        }
+      ]
+    }
+  ],
+  "style": [
+    {
+      "id": "mapaEstilo",
+      "label": "Opciones de Mapa",
+      "elements": [
+        {
+          "id": "colorScale",
+          "label": "Escala de color",
+          "type": "COLOR_PALETTE",
+          "defaultValue": "greenToRed"
+        },
+        {
+          "id": "showLabels",
+          "label": "Mostrar etiquetas de barrios",
+          "type": "BOOLEAN",
+          "defaultValue": false
+        },
+        {
+          "id": "showLegend",
+          "label": "Mostrar Leyenda",
+          "type": "BOOLEAN",
+          "defaultValue": false
+        },
+        {
+          "id": "borderColor",
+          "label": "Color del Borde",
+          "type": "COLOR_PALETTE",
+          "defaultValue": "#000000"
+        },
+        {
+          "id": "borderWidth",
+          "label": "Ancho del Borde",
+          "type": "NUMBER",
+          "defaultValue": 1
+        }
+      ]
+    }
+  ]
+}

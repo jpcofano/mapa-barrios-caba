@@ -1,0 +1,15 @@
+{
+  "name": "visualizacion-barrios",
+  "version": "1.0.0",
+  "description": "Mapa coroplético de barrios de CABA para Looker Studio",
+  "main": "dist/Visualization.js",
+  "scripts": {
+"build": "esbuild src/Visualization.js --bundle --outfile=dist/Visualization.js --format=iife --minify --loader:.css=text --external:@google/dscc"
+  },
+  "dependencies": {
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.19.11"
+  }
+}
