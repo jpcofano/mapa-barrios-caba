@@ -1,10 +1,10 @@
 {
   "name": "Mapa de barrios CABA",
-  "version": "1.3.2",
+  "version": "1.3.0",
   "organization": "jpcofano",
   "description": "Mapa coropletico de los barrios de la Ciudad Autonoma de Buenos Aires",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
-  "devMode": false,
+  "devMode": true,
   "components": [
     {
       "id": "barrios-caba-map",
@@ -15,9 +15,9 @@
       "supportsExport": false,
       "resource": {
         "js": [
-          "https://storage.googleapis.com/mapa-barrios-degcba/dist/Visualization.js"
+          "gs://mapa-barrios-degcba/dist/Visualization.js"
         ],
-        "config": "https://storage.googleapis.com/mapa-barrios-degcba/Config.json"
+        "config": "gs://mapa-barrios-degcba/Config.json"
       }
     }
   ]
