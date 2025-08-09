@@ -23,10 +23,16 @@
       "label": "Opciones de Mapa",
       "elements": [
         {
-          "id": "colorScale",
-          "label": "Escala de color",
-          "type": "COLOR_PALETTE",
-          "defaultValue": "greenToRed"
+          "id": "startColor",
+          "label": "Color mínimo",
+          "type": "COLOR",
+          "defaultValue": "#ffffcc"
+        },
+        {
+          "id": "endColor",
+          "label": "Color máximo",
+          "type": "COLOR",
+          "defaultValue": "#800026"
         },
         {
           "id": "showLabels",
@@ -40,8 +46,12 @@
           "type": "BOOLEAN",
           "defaultValue": false
         },
-{ "id": "borderColor", "label": "Color del Borde", "type": "COLOR", "defaultValue": "#000000" }
-,
+        {
+          "id": "borderColor",
+          "label": "Color del Borde",
+          "type": "COLOR",
+          "defaultValue": "#000000"
+        },
         {
           "id": "borderWidth",
           "label": "Ancho del Borde",
