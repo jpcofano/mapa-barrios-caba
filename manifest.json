@@ -5,20 +5,26 @@
   "description": "Mapa coropletico de los barrios de la Ciudad Autonoma de Buenos Aires",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
   "devMode": true,
-  "components": [
-    {
-      "id": "barrios-caba-map",
-      "name": "Mapa de Barrios CABA",
-      "description": "Barrios Ciudad Autonoma de Buenos Aires.",
-      "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
-      "supportsInteractivity": true,
-      "supportsExport": false,
-      "resource": {
-        "js": [
-          "gs://mapa-barrios-degcba/dist/Visualization.js"
-        ],
-        "config": "gs://mapa-barrios-degcba/Config.json"
+  "dataStudio": {
+    "name": "Mapa de barrios CABA",
+    "description": "Visualización para mostrar los barrios de CABA en un mapa usando datos de Looker Studio.",
+    "supportUrl": "https://example.com/support",
+    "privacyPolicyUrl": "https://example.com/privacy",
+    "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
+    "components": [
+      {
+        "name": "Mapa de Barrios CABA",
+        "id": "barrios-caba-map",
+        "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
+        "supportsInteractivity": true,
+        "supportsExport": false,
+        "resource": {
+          "js": [
+            "gs://mapa-barrios-degcba/dist/Visualization.js"
+          ],
+          "config": "gs://mapa-barrios-degcba/Config.json"
+        }
       }
-    }
-  ]
+    ]
+  }
 }

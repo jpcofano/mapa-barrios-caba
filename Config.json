@@ -40,8 +40,12 @@
           "type": "BOOLEAN",
           "defaultValue": false
         },
-{ "id": "borderColor", "label": "Color del Borde", "type": "COLOR", "defaultValue": "#000000" }
-,
+        {
+          "id": "borderColor",
+          "label": "Color del Borde",
+          "type": "COLOR_PALETTE",
+          "defaultValue": "#000000"
+        },
         {
           "id": "borderWidth",
           "label": "Ancho del Borde",
