@@ -1,46 +1,43 @@
 name: Deploy to GCS
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
 env:
-  BUCKET: ${{ secrets.GCS_BUCKET }}
-  SYNC_DIR: .  # carpeta del repo a sincronizar con el bucket
+  BUCKET: ${{ secrets.GCS_BUCKET }}   # ej: mapa-barrios-degcba
+  SYNC_DIR: dist
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Borrá esto si no necesitás build de Node
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - run: npm ci
-        continue-on-error: true
-      - run: npm run build
-        continue-on-error: true
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Auth to Google Cloud (WIF)
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (Vite)
+        run: npm run build
+
+      # Auth con service account JSON en GCP_SA_KEY
+      - name: Auth to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Sanity check
-        run: gsutil ls gs://${{ env.BUCKET }}/ || true
-
       - name: Upload to GCS (rsync)
-        run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
-
-      - name: Set Cache-Control (optional)
-        run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/** || true
+        run: |
+          gsutil -m rsync -r -d "${{ env.SYNC_DIR }}" "gs://${{ env.BUCKET }}/"
