@@ -38,7 +38,7 @@ jobs:
         run: gsutil ls gs://${{ env.BUCKET }}/ || true
 
       - name: Upload to GCS (rsync)
-        run: gsutil -m rsync -r -d ./${{ env.build_dir }} gs://${{ env.BUCKET }}/visualizations/mapa-barrios/
+        run: gsutil -m rsync -r -d ./${{ env.build_dir }} gs://${{ env.BUCKET }}/
 
       - name: Set Cache-Control (optional)
-        run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/visualizations/mapa-barrios/** || true
+        run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/** || true
