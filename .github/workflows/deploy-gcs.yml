@@ -38,6 +38,7 @@ jobs:
 
       - name: Upload to GCS (rsync)
         run: gsutil -m rsync -r -d -x '(^|/)\.git/|(^|/)node_modules/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
+        run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
 
       - name: Set Cache-Control (optional)
         run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/** || true
