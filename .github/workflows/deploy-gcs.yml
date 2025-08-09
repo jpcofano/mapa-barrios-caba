@@ -37,6 +37,7 @@ jobs:
         run: gsutil ls gs://${{ env.BUCKET }}/ || true
 
       - name: Upload to GCS (rsync)
+        run: gsutil -m rsync -r -d -x '(^|/)\.git/|(^|/)node_modules/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
         run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
 
       - name: Set Cache-Control (optional)
