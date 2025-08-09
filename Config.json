@@ -4,16 +4,8 @@
       "id": "mainData",
       "label": "Datos del Mapa",
       "elements": [
-        {
-          "id": "barrio",
-          "label": "Barrio",
-          "type": "DIMENSION"
-        },
-        {
-          "id": "valor",
-          "label": "Valor",
-          "type": "METRIC"
-        }
+        { "id": "barrio", "label": "Barrio", "type": "DIMENSION" },
+        { "id": "valor",  "label": "Valor",   "type": "METRIC" }
       ]
     }
   ],
@@ -25,33 +17,25 @@
         {
           "id": "colorScale",
           "label": "Escala de color",
-          "type": "COLOR_PALETTE",
+          "type": "DROPDOWN",
+          "options": [
+            { "label": "Amarillo → Rojo", "value": "yellow" },
+            { "label": "Verde → Rojo",    "value": "greenToRed" },
+            { "label": "Azul → Verde",    "value": "blueToYellow" },
+            { "label": "Escala de grises","value": "grayscale" }
+          ],
           "defaultValue": "greenToRed"
         },
-        {
-          "id": "showLabels",
-          "label": "Mostrar etiquetas de barrios",
-          "type": "BOOLEAN",
-          "defaultValue": false
-        },
-        {
-          "id": "showLegend",
-          "label": "Mostrar Leyenda",
-          "type": "BOOLEAN",
-          "defaultValue": false
-        },
+        { "id": "invertScale", "label": "Invertir escala", "type": "BOOLEAN", "defaultValue": false },
+        { "id": "showLabels",  "label": "Mostrar etiquetas de barrios", "type": "BOOLEAN", "defaultValue": false },
+        { "id": "showLegend",  "label": "Mostrar Leyenda", "type": "BOOLEAN", "defaultValue": true },
         {
           "id": "borderColor",
           "label": "Color del Borde",
-          "type": "COLOR_PALETTE",
-          "defaultValue": "#000000"
+          "type": "COLOR",
+          "defaultValue": { "color": "#000000" }
         },
-        {
-          "id": "borderWidth",
-          "label": "Ancho del Borde",
-          "type": "NUMBER",
-          "defaultValue": 1
-        }
+        { "id": "borderWidth", "label": "Ancho del Borde", "type": "NUMBER", "defaultValue": 1 }
       ]
     }
   ]

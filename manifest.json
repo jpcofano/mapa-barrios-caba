@@ -1,10 +1,10 @@
 {
   "name": "Mapa de barrios CABA",
-  "version": "1.4.7",
+  "version": "1.5.0",
   "organization": "jpcofano",
-  "description": "Mapa coropletico de los barrios de la Ciudad Autonoma de Buenos Aires",
+  "description": "Mapa coroplético de los barrios de la Ciudad Autónoma de Buenos Aires para Looker Studio.",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
-  "devMode": true,
+  "devMode": false,
   "dataStudio": {
     "name": "Mapa de barrios CABA",
     "description": "Visualización para mostrar los barrios de CABA en un mapa usando datos de Looker Studio.",
@@ -20,9 +20,9 @@
         "supportsExport": false,
         "resource": {
           "js": [
-            "gs://mapa-barrios-degcba/dist/Visualization.js"
+            "https://storage.googleapis.com/mapa-barrios-degcba/dist/Visualization.js"
           ],
-          "config": "gs://mapa-barrios-degcba/Config.json"
+          "config": "https://storage.googleapis.com/mapa-barrios-degcba/Config.json"
         }
       }
     ]
