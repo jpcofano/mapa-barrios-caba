@@ -69,6 +69,39 @@ const getQuintileBreaks = (dataArray) => {
 };
 
 /**
+ * Build a gradient array from two colors
+ */
+const interpolateColors = (startHex, endHex, steps = 5) => {
+  const hexToRgb = (hex) => {
+    const clean = hex.replace('#', '');
+    const num = parseInt(clean, 16);
+    return {
+      r: (num >> 16) & 255,
+      g: (num >> 8) & 255,
+      b: num & 255,
+    };
+  };
+  const rgbToHex = ({ r, g, b }) =>
+    `#${[r, g, b]
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('')}`;
+  const start = hexToRgb(startHex);
+  const end = hexToRgb(endHex);
+  const result = [];
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    result.push(
+      rgbToHex({
+        r: Math.round(start.r + t * (end.r - start.r)),
+        g: Math.round(start.g + t * (end.g - start.g)),
+        b: Math.round(start.b + t * (end.b - start.b)),
+      })
+    );
+  }
+  return result;
+};
+
+/**
  * Main draw
  */
 const drawViz = (data) => {
@@ -85,6 +118,7 @@ const drawViz = (data) => {
   const mapContainer = document.createElement('div');
   mapContainer.style.width = '100%';
   mapContainer.style.height = '100%';
+  mapContainer.style.minHeight = '400px';
   container.appendChild(mapContainer);
 
   // Fresh map each render to avoid detaching/reattaching DOM issues
@@ -107,14 +141,9 @@ const drawViz = (data) => {
     allValues.push(value);
   });
   const quintileBreaks = getQuintileBreaks(allValues);
-
-  const colorPalettes = {
-    yellow: ["#ffffcc", "#fed976", "#fd8d3c", "#e31a1c", "#800026"],
-    greenToRed: ["#2c7bb6", "#abd9e9", "#ffffbf", "#fdae61", "#d7191c"],
-    blueToYellow: ["#d0d1e6", "#a6bddb", "#67a9cf", "#1c9099", "#016c59"],
-    grayscale: ["#f7f7f7", "#cccccc", "#969696", "#636363", "#252525"]
-  };
-  const selectedPalette = colorPalettes[style?.colorScale?.value] || colorPalettes.yellow;
+  const startColor = style?.startColor?.value?.color || '#ffffcc';
+  const endColor = style?.endColor?.value?.color || '#800026';
+  const selectedPalette = interpolateColors(startColor, endColor, 5);
 
   const getColor = (value) => {
     if (value <= quintileBreaks[0]) return selectedPalette[0];
