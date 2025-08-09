@@ -17,15 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # Borrá esto si no necesitás build de Node
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 18
+          cache: npm
       - run: npm ci
-        continue-on-error: true
       - run: npm run build
-        continue-on-error: true
 
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
@@ -40,10 +37,7 @@ jobs:
         run: gsutil ls gs://${{ env.BUCKET }}/ || true
 
       - name: Upload to GCS (rsync)
-        run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
-
-
-        run: gsutil -m rsync -r -d ./${{ env.build_dir }} gs://${{ env.BUCKET }}/
+        run: gsutil -m rsync -r -d -x '(^|/)\.git/|(^|/)node_modules/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
 
       - name: Set Cache-Control (optional)
         run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/** || true
