@@ -19,6 +19,7 @@ const dscc = window.dscc;
 let mapInstance = null;
 let geojsonLayer = null;
 let legendControl = null;
+let geojsonCache = null;
 
 /**
  * Inject legend CSS once
@@ -124,64 +125,75 @@ const drawViz = (data) => {
     return selectedPalette[4];
   };
 
-  fetch("https://storage.googleapis.com/mapa-barrios-degcba/barrioscaba.geojson")
-    .then((response) => {
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    })
-    .then((geojsonData) => {
-      if (geojsonLayer) {
-        try { mapInstance.removeLayer(geojsonLayer); } catch (e) {}
-      }
+  const renderGeojson = (geojsonData) => {
+    if (geojsonLayer) {
+      try { mapInstance.removeLayer(geojsonLayer); } catch (e) {}
+    }
 
-      geojsonLayer = L.geoJSON(geojsonData, {
-        style: (feature) => {
+    geojsonLayer = L.geoJSON(geojsonData, {
+      style: (feature) => {
+        const barrioName = feature.properties?.nombre;
+        const value = dataMap[barrioName] || 0;
+        return {
+          color: style?.borderColor?.value?.color || '#000',
+          weight: parseFloat(style?.borderWidth?.value ?? 1),
+          fillColor: getColor(value),
+          fillOpacity: 0.7
+        };
+      },
+      onEachFeature: (feature, layer) => {
+        if (style?.showLabels?.value) {
           const barrioName = feature.properties?.nombre;
           const value = dataMap[barrioName] || 0;
-          return {
-            color: style?.borderColor?.value?.color || '#000',
-            weight: parseFloat(style?.borderWidth?.value ?? 1),
-            fillColor: getColor(value),
-            fillOpacity: 0.7
-          };
-        },
-        onEachFeature: (feature, layer) => {
-          if (style?.showLabels?.value) {
-            const barrioName = feature.properties?.nombre;
-            const value = dataMap[barrioName] || 0;
-            layer.bindTooltip(`${barrioName}: ${value.toLocaleString()}`);
-          }
+          layer.bindTooltip(`${barrioName}: ${value.toLocaleString()}`);
         }
-      }).addTo(mapInstance);
-
-      // Legend
-      if (legendControl) {
-        try { mapInstance.removeControl(legendControl); } catch (e) {}
-        legendControl = null;
       }
+    }).addTo(mapInstance);
 
-      if (style?.showLegend?.value) {
-        addLegendCss();
-        legendControl = L.control({ position: 'bottomright' });
-        legendControl.onAdd = function () {
-          const div = L.DomUtil.create('div', 'info legend');
-          const grades = [0, ...quintileBreaks];
-          const fmt = (n) => Number(n).toLocaleString();
+    // Legend
+    if (legendControl) {
+      try { mapInstance.removeControl(legendControl); } catch (e) {}
+      legendControl = null;
+    }
 
-          div.innerHTML += `<i style="background:${getColor(grades[0])}"></i> ≤ ${fmt(grades[1])}<br>`;
-          for (let i = 1; i < grades.length - 1; i++) {
-            div.innerHTML += `<i style="background:${getColor(grades[i] + 1)}"></i> ${fmt(grades[i] + 1)}–${fmt(grades[i + 1])}<br>`;
-          }
-          div.innerHTML += `<i style="background:${getColor(grades[grades.length - 1] + 1)}"></i> > ${fmt(grades[grades.length - 1])}`;
-          return div;
-        };
-        legendControl.addTo(mapInstance);
-      }
-    })
-    .catch((error) => {
-      console.error('Error GeoJSON:', error);
-      container.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Error: No se pudo cargar el mapa de barrios. <br/>${error.message}</div>`;
-    });
+    if (style?.showLegend?.value) {
+      addLegendCss();
+      legendControl = L.control({ position: 'bottomright' });
+      legendControl.onAdd = function () {
+        const div = L.DomUtil.create('div', 'info legend');
+        const grades = [0, ...quintileBreaks];
+        const fmt = (n) => Number(n).toLocaleString();
+
+        div.innerHTML += `<i style="background:${getColor(grades[0])}"></i> ≤ ${fmt(grades[1])}<br>`;
+        for (let i = 1; i < grades.length - 1; i++) {
+          div.innerHTML += `<i style="background:${getColor(grades[i] + 1)}"></i> ${fmt(grades[i] + 1)}–${fmt(grades[i + 1])}<br>`;
+        }
+        div.innerHTML += `<i style="background:${getColor(grades[grades.length - 1] + 1)}"></i> > ${fmt(grades[grades.length - 1])}`;
+        return div;
+      };
+      legendControl.addTo(mapInstance);
+    }
+  };
+
+  const handleError = (error) => {
+    console.error('Error GeoJSON:', error);
+    container.innerHTML = `<div style="padding: 20px; text-align: center; color: red;">Error: No se pudo cargar el mapa de barrios. <br/>${error.message}</div>`;
+  };
+
+  if (geojsonCache) {
+    renderGeojson(geojsonCache);
+  } else {
+    fetch("https://storage.googleapis.com/mapa-barrios-degcba/barrioscaba.geojson")
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((geojsonData) => {
+        geojsonCache = geojsonData;
+        renderGeojson(geojsonData);
+      })
+      .catch(handleError);
+  }
 };
 
 // Subscribe
