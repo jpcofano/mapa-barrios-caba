@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 name: Deploy to GCS
 on:
   push:
@@ -18,12 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Borrá esto si no necesitás build de Node
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: npm
+          node-version: "20"
       - run: npm ci
+        continue-on-error: true
       - run: npm run build
+        continue-on-error: true
 
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
@@ -38,53 +40,10 @@ jobs:
         run: gsutil ls gs://${{ env.BUCKET }}/ || true
 
       - name: Upload to GCS (rsync)
-        run: gsutil -m rsync -r -d -x '(^|/)\.git/|(^|/)node_modules/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
         run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
 
-      - name: Set Cache-Control (optional)
-=======
-name: Deploy to GCS
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
-env:
-  BUCKET: ${{ secrets.GCS_BUCKET }}
-  SYNC_DIR: .  # carpeta del repo a sincronizar con el bucket
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-
-      - name: Auth to Google Cloud (WIF)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
-
-      - name: Sanity check
-        run: gsutil ls gs://${{ env.BUCKET }}/ || true
-
-      - name: Upload to GCS (rsync)
-        run: gsutil -m rsync -r -d -x '(^|/)\.git/|(^|/)node_modules/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
-        run: gsutil -m rsync -r -d -x '(^|/)\.git/' ${{ env.SYNC_DIR }} gs://${{ env.BUCKET }}/
+        run: gsutil -m rsync -r -d ./${{ env.build_dir }} gs://${{ env.BUCKET }}/
 
       - name: Set Cache-Control (optional)
->>>>>>> 1f53d7114cb1c146b5d0dca07f673362bae60958
         run: gsutil -m setmeta -h "Cache-Control:public, max-age=300" gs://${{ env.BUCKET }}/** || true
