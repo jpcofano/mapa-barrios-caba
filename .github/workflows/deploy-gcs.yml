@@ -1,4 +1,4 @@
-name: Deploy to GCS
+name: Deploy (Vite → GCS)
 
 on:
   push:
@@ -6,38 +6,27 @@ on:
   workflow_dispatch:
 
 env:
-  BUCKET: ${{ secrets.GCS_BUCKET }}   # ej: mapa-barrios-degcba
+  BUCKET: ${{ secrets.GCS_BUCKET }}
   SYNC_DIR: dist
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run build   # <-- Vite
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Build (Vite)
-        run: npm run build
-
-      # Auth con service account JSON en GCP_SA_KEY
-      - name: Auth to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/auth@v2
+        with: { credentials_json: ${{ secrets.GCP_SA_KEY }} }
+      - uses: google-github-actions/setup-gcloud@v2
 
       - name: Upload to GCS (rsync)
         run: |
           gsutil -m rsync -r -d "${{ env.SYNC_DIR }}" "gs://${{ env.BUCKET }}/"
+          # Evitar caché agresivo (LS cachea fuerte)
+          gsutil -m setmeta -h "Cache-Control:no-store" \
+            "gs://${{ env.BUCKET }}/Visualization.js" \
+            "gs://${{ env.BUCKET }}/style.css" || true
