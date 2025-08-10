@@ -16,7 +16,12 @@
           "type": "METRIC",
           "options": { "min": 0, "max": 5 }
         },
-        { "id": "maxRows", "label": "Máximo de filas", "type": "MAX_RESULTS", "options": { "max": 5000 } }
+        {
+          "id": "maxRows",
+          "label": "Máximo de filas",
+          "type": "MAX_RESULTS",
+          "options": { "max": 5000 }
+        }
       ]
     }
   ],
@@ -25,6 +30,16 @@
       "id": "mapaEstilo",
       "label": "Opciones de Mapa",
       "elements": [
+        {
+          "id": "nivelJerarquia",
+          "label": "Nivel de jerarquía",
+          "type": "SELECT_SINGLE",
+          "options": [
+            { "label": "Barrio", "value": "barrio" },
+            { "label": "Comuna", "value": "comuna" }
+          ],
+          "defaultValue": "barrio"
+        },
         {
           "id": "colorScale",
           "label": "Escala de color",
