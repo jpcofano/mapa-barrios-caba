@@ -12,7 +12,7 @@ export default function drawVisualization(container) {
   }).addTo(map);
 
   // Load GeoJSON with city neighborhoods
-  fetch('barrioscaba.geojson')
+  fetch('https://storage.googleapis.com/mapa-barrios-caba/barrioscaba.geojson')
     .then(response => response.json())
     .then(data => {
       L.geoJSON(data, {
