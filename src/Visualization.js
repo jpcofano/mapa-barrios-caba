@@ -120,7 +120,7 @@ try {
     // Defaults alineados al Config.json (sin 'hierarchy')
     const s = msg.styleById;
     msg.styleById = {
-      nivelJerarquia: { value: s?.nivelJerarquia?.value ?? 'barrio' },
+      nivelJerarquia: { value: s?.nivelJerarquia?.value ?? 'Barrio' },
       colorScale:     { value: s?.colorScale?.value ?? 'greenToRed' },
       invertScale:    { value: !!s?.invertScale?.value },
       showLabels:     { value: !!s?.showLabels?.value },
