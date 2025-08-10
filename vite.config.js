@@ -13,3 +13,16 @@ export default {
       fileName: () => 'Visualization.js',
       formats: ['iife'] // ejecutable directo en el navegador (no module)
     },
+    rollupOptions: {
+      output: {
+        // Evita hashes en nombres y subcarpetas para JS/CSS/imágenes
+        assetFileNames: '[name][extname]',
+        chunkFileNames: '[name].js',
+        entryFileNames: 'Visualization.js'
+      }
+    }
+  },
+  test: {
+    environment: 'jsdom'
+  }
+};
