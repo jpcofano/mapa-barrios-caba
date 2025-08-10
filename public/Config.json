@@ -4,8 +4,19 @@
       "id": "mainData",
       "label": "Datos del Mapa",
       "elements": [
-        { "id": "barrio", "label": "Barrio", "type": "DIMENSION" },
-        { "id": "valor",  "label": "Valor",   "type": "METRIC" }
+        {
+          "id": "barrio",
+          "label": "Barrio (texto)",
+          "type": "DIMENSION",
+          "options": { "min": 0, "max": 1, "supportedTypes": ["DEFAULT"] }
+        },
+        {
+          "id": "valor",
+          "label": "Valor (métrica)",
+          "type": "METRIC",
+          "options": { "min": 0, "max": 5 }
+        },
+        { "id": "maxRows", "label": "Máximo de filas", "type": "MAX_RESULTS", "options": { "max": 5000 } }
       ]
     }
   ],
@@ -17,7 +28,7 @@
         {
           "id": "colorScale",
           "label": "Escala de color",
-          "type": "DROPDOWN",
+          "type": "SELECT_SINGLE",
           "options": [
             { "label": "Amarillo → Rojo", "value": "yellow" },
             { "label": "Verde → Rojo",    "value": "greenToRed" },
@@ -26,17 +37,12 @@
           ],
           "defaultValue": "greenToRed"
         },
-        { "id": "invertScale", "label": "Invertir escala", "type": "BOOLEAN", "defaultValue": false },
-        { "id": "showLabels",  "label": "Mostrar etiquetas de barrios", "type": "BOOLEAN", "defaultValue": false },
-        { "id": "showLegend",  "label": "Mostrar Leyenda", "type": "BOOLEAN", "defaultValue": true },
-        {
-          "id": "borderColor",
-          "label": "Color del Borde",
-          "type": "COLOR",
-          "defaultValue": { "color": "#000000" }
-        },
-        { "id": "borderWidth", "label": "Ancho del Borde", "type": "NUMBER", "defaultValue": 1 }
+        { "id": "invertScale", "label": "Invertir escala", "type": "CHECKBOX", "defaultValue": false },
+        { "id": "showLabels",  "label": "Mostrar etiquetas de barrios", "type": "CHECKBOX", "defaultValue": false },
+        { "id": "showLegend",  "label": "Mostrar Leyenda", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "borderColor", "label": "Color del Borde", "type": "BORDER_COLOR", "defaultValue": { "color": "#000000" } },
+        { "id": "borderWidth", "label": "Ancho del Borde", "type": "LINE_WEIGHT", "defaultValue": 1 }
       ]
     }
-  ]
-}
+  ],
+  "features": { "enableCompariso

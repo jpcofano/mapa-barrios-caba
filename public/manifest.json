@@ -1,25 +1,22 @@
 {
   "name": "Mapa de barrios CABA",
   "organization": "jpcofano",
-  "organizationUrl": "https://github.com/jpcofano",
-  "packageUrl": "https://github.com/jpcofano/mapa-barrios-degcba",
-  "version": "1.0.0",
-  "description": "Mapa coroplético de la Ciudad Autónoma de Buenos Aires para Looker Studio.",
+  "description": "Mapa coroplético de los barrios de CABA para Looker Studio.",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
-  "supportUrl": "https://github.com/jpcofano/mapa-barrios-degcba/issues",
-  "privacyPolicyUrl": "https://github.com/jpcofano/mapa-barrios-degcba",
-  "devMode": false,
+  "packageUrl": "https://github.com/jpcofano/mapa-barrios-caba",
+  "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
+  "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
+  "devMode": true,
   "components": [
     {
       "id": "barrios-caba-map",
       "name": "Mapa de Barrios CABA",
+      "description": "Visualización de barrios de CABA con GeoJSON.",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
-      "supportsInteractivity": true,
-      "supportsExport": false,
       "resource": {
         "js": "gs://mapa-barrios-degcba/Visualization.js",
-        "css": "gs://mapa-barrios-degcba/Visualization.css",
-        "config": "gs://mapa-barrios-degcba/Config.json"
+        "config": "gs://mapa-barrios-degcba/Config.json",
+        "css": "gs://mapa-barrios-degcba/Visualization.css"
       }
     }
   ]
