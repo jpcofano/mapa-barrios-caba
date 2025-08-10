@@ -1,161 +1,197 @@
+// Visualization.js
+// Comunidad Looker Studio — Viz Leaflet sin fetch y sin tiles (CSP-safe)
+
 import L from 'leaflet';
 
-// Helpers para leer estilos desde Looker Studio según tu Config.json
+// ---------- Utils de estilo (alineados a tu Config.json) ----------
 function readStyle(message = {}) {
   const s = message?.styleById ?? {};
   return {
-    colorScale: s?.colorScale?.value ?? 'greenToRed',
-    invertScale: !!s?.invertScale?.value,
-    showLabels: !!s?.showLabels?.value,
-    showLegend: s?.showLegend?.value ?? true,
-    borderColor: s?.borderColor?.value?.color ?? '#000000',
-    borderWidth: Number(s?.borderWidth?.value ?? 1),
+    nivelJerarquia: s?.nivelJerarquia?.value ?? "barrio",
+    colorScale:     s?.colorScale?.value     ?? "greenToRed",
+    invertScale:    !!s?.invertScale?.value,
+    showLabels:     !!s?.showLabels?.value,
+    showLegend:     (s?.showLegend?.value ?? true),
+    borderColor:    s?.borderColor?.value?.color ?? "#000000",
+    borderWidth:    Number(s?.borderWidth?.value ?? 1),
   };
 }
 
-// Color base simple por escala (puedes refinarlo a gradientes luego)
-function pickFillColor(scale, invert) {
-  const base = {
-    yellow: '#FFC107',
-    greenToRed: invert ? '#E53935' : '#43A047',
-    blueToYellow: invert ? '#FFC107' : '#1E88E5',
-    grayscale: '#9E9E9E',
-  };
-  return base[scale] ?? '#3388ff';
+function colorFromScale(scaleName, t, invert = false) {
+  // t en [0,1]
+  const clamp = (x) => Math.min(1, Math.max(0, x ?? 0));
+  t = clamp(t);
+  if (invert) t = 1 - t;
+
+  // Paletas simples para demo; podés reemplazar por una rampa más linda luego
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+  const rgb = (r, g, b) => `rgb(${r},${g},${b})`;
+
+  switch (scaleName) {
+    case "yellow":       // Amarillo → Rojo
+      return rgb(lerp(255, 244, t), lerp(193, 67, t), lerp(7, 54, t));
+    case "blueToYellow": // Azul → Amarillo
+      return rgb(lerp(30, 255, t),  lerp(136,193, t), lerp(229, 7, t));
+    case "grayscale":    // Gris → Negro
+      const g = Math.round(255 * (1 - t));
+      return rgb(g, g, g);
+    case "greenToRed":   // Verde → Rojo (default)
+    default:
+      return rgb(lerp(67, 229, t), lerp(160, 57, t), lerp(71, 35, t));
+  }
 }
 
-// Default export usado por Looker Studio para renderizar
-// AHORA acepta el 'message' opcional del runtime
+// ---------- Utils de datos (join barrio → valor) ----------
+// Estructura esperada (transform: dscc.objectTransform):
+// - message.fieldsByConfigId.mainData: array de fields con `concept` ('DIMENSION'/'METRIC'), `id`, `configId`
+// - message.tables.DEFAULT.rows: array de objetos { [field.id]: value, ... }
+function buildValueMap(message) {
+  try {
+    const fields = message?.fieldsByConfigId?.mainData ?? [];
+    const rows = message?.tables?.DEFAULT?.rows ?? [];
+    if (!fields.length || !rows.length) return null;
+
+    // Buscar el fieldId para la dimensión de barrio (configId === 'barrio')
+    const barrioField =
+      fields.find(f => (f.configId || f.id) === "barrio" && f.concept === "DIMENSION") ||
+      fields.find(f => f.concept === "DIMENSION");
+    if (!barrioField?.id) return null;
+
+    // Primera métrica disponible
+    const metricField = fields.find(f => f.concept === "METRIC");
+    if (!metricField?.id) return null;
+
+    const map = new Map();
+    let min = Infinity, max = -Infinity;
+
+    for (const r of rows) {
+      const barrio = r[barrioField.id];
+      const val = Number(r[metricField.id]);
+      if (barrio == null || isNaN(val)) continue;
+      map.set(String(barrio).toUpperCase(), val);
+      if (val < min) min = val;
+      if (val > max) max = val;
+    }
+    if (!map.size || !isFinite(min) || !isFinite(max) || min === max) {
+      return { map, min: 0, max: 1 }; // evita división por cero
+    }
+    return { map, min, max };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeBarrioName(s) {
+  return String(s ?? "").trim().toUpperCase();
+}
+
+// ---------- Render principal ----------
 export default function drawVisualization(container, message = {}) {
-  // Limpia contenedor
-  container.innerHTML = '';
-  container.style.width = '100%';
-  container.style.height = '100%';
+  // Limpieza
+  container.innerHTML = "";
+  container.style.width = "100%";
+  container.style.height = "100%";
 
-  // Lee estilos desde Looker Studio (no existe 'hierarchy' acá)
   const style = readStyle(message);
 
-  // Inicializa mapa en CABA
-  const map = L.map(container).setView([-34.61, -58.38], 12);
+  // Mapa sin tiles (fondo blanco) — compatible con CSP
+  const map = L.map(container, {
+    zoomControl: true,
+    attributionControl: false
+  }).setView([-34.61, -58.38], 12);
 
-  // Capa base OSM
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
+  // GeoJSON inyectado por manifest (ver barrioscaba.js)
+  const data = (typeof window !== "undefined") ? window.__GEOJSON : null;
+  if (!data) {
+    console.error("GeoJSON no disponible: asegurate de incluir 'barrioscaba.js' en el manifest.json");
+    // Render minimal para no dejar el contenedor vacío
+    L.rectangle([[-34.75, -58.55], [-34.48, -58.25]], { color: "#bbb", weight: 1, fillOpacity: 0.05 }).addTo(map);
+    return;
+  }
+
+  // Si hay datos de Looker, construir mapa de valores por barrio
+  const stats = buildValueMap(message);
+
+  // Función de estilo por feature (choropleth si hay datos, si no color plano)
+  const styleFn = (feature) => {
+    let fill = "#3388ff";
+    if (stats?.map?.size) {
+      const barrio = normalizeBarrioName(feature?.properties?.BARRIO);
+      const v = stats.map.get(barrio);
+      if (v != null) {
+        const t = (v - stats.min) / (stats.max - stats.min || 1);
+        fill = colorFromScale(style.colorScale, t, style.invertScale);
+      } else {
+        fill = colorFromScale(style.colorScale, 0.05, style.invertScale); // barrios sin dato
+      }
+    } else {
+      // Sin datos: tono base de la escala
+      fill = colorFromScale(style.colorScale, 0.4, style.invertScale);
+    }
+
+    return {
+      color: style.borderColor,
+      weight: style.borderWidth,
+      fillColor: fill,
+      fillOpacity: 0.45
+    };
+  };
+
+  const layer = L.geoJSON(data, {
+    style: styleFn,
+    onEachFeature: (feature, lyr) => {
+      const name = feature?.properties?.BARRIO ?? "—";
+      if (style.showLabels) {
+        lyr.bindTooltip(String(name), { sticky: true, direction: "center" });
+      }
+      // Tooltip con valor si hay datos
+      if (stats?.map?.size) {
+        const key = normalizeBarrioName(name);
+        const v = stats.map.get(key);
+        const valTxt = (v != null ? v : "s/d");
+        lyr.bindPopup(`<strong>${name}</strong><br/>Valor: ${valTxt}`, { closeButton: false });
+      } else {
+        lyr.bindPopup(`<strong>${name}</strong>`, { closeButton: false });
+      }
+    }
   }).addTo(map);
 
-  // Carga GeoJSON
-  const GEOJSON_URL = 'https://storage.googleapis.com/mapa-barrios-degcba/barrioscaba.geojson';
+  try {
+    map.fitBounds(layer.getBounds(), { padding: [12, 12] });
+  } catch {}
 
-  fetch(GEOJSON_URL, { cache: 'no-store' })
-    .then(r => {
-      if (!r.ok) throw new Error(`GeoJSON HTTP ${r.status}`);
-      return r.json();
-    })
-    .then(data => {
-      const fill = pickFillColor(style.colorScale, style.invertScale);
+  // Leyenda opcional
+  if (style.showLegend) {
+    const legend = L.control({ position: "bottomright" });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create("div", "legend");
+      div.style.background = "white";
+      div.style.padding = "8px 10px";
+      div.style.borderRadius = "8px";
+      div.style.boxShadow = "0 1px 4px rgba(0,0,0,.25)";
+      div.style.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
 
-      const layer = L.geoJSON(data, {
-        style: () => ({
-          color: style.borderColor,
-          weight: style.borderWidth,
-          fillColor: fill,
-          fillOpacity: 0.4
-        }),
-        onEachFeature: (feature, lyr) => {
-          // Etiquetas opcionales
-          if (style.showLabels) {
-            const name = feature?.properties?.BARRIO ?? '—';
-            lyr.bindTooltip(name, { permanent: false, direction: 'center' });
-          }
-        }
-      }).addTo(map);
-
-      // Leyenda opcional (placeholder)
-      if (style.showLegend) {
-        const legend = L.control({ position: 'bottomright' });
-        legend.onAdd = () => {
-          const div = L.DomUtil.create('div', 'legend');
-          div.style.background = 'white';
-          div.style.padding = '6px 10px';
-          div.style.borderRadius = '6px';
-          div.style.boxShadow = '0 1px 4px rgba(0,0,0,.2)';
-          div.innerHTML = `<strong>Escala</strong><br>${style.colorScale}${style.invertScale ? ' (invertida)' : ''}`;
-          return div;
-        };
-        legend.addTo(map);
+      const entries = [];
+      const steps = 5;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const c = colorFromScale(style.colorScale, t, style.invertScale);
+        entries.push(`<span style="display:inline-block;width:12px;height:12px;background:${c};margin-right:6px;border:1px solid #0001"></span>${Math.round(t * 100)}%`);
       }
-    })
-    .catch(err => {
-      console.error('Error cargando GeoJSON:', err);
-    });
+
+      div.innerHTML = `
+        <div style="margin-bottom:6px;"><strong>Escala</strong> · ${style.colorScale}${style.invertScale ? " (invertida)" : ""}</div>
+        <div style="display:grid;grid-template-columns:auto auto;gap:4px 12px;align-items:center;">
+          ${entries.map(e => `<div>${e}</div>`).join("")}
+        </div>
+      `;
+      return div;
+    };
+    legend.addTo(map);
+  }
 }
 
 // Exposición global por compatibilidad con wrappers
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   window.drawVisualization = drawVisualization;
-}
-// --- WRAPPER INLINE PARA LOOKER STUDIO ---
-try {
-  // Carga perezosa de dscc si está disponible (dev vs prod)
-  // En prod Looker expone la subscripción; si no, no rompe.
-  // @ts-ignore
-  const dscc = window.dscc || (typeof require !== 'undefined' ? require('@google/dscc') : null);
-
-  const container = document.getElementById('container') || (function () {
-    const div = document.createElement('div');
-    div.id = 'container';
-    div.style.width = '100%';
-    div.style.height = '100%';
-    document.body.appendChild(div);
-    return div;
-  })();
-
-  function normalizeMessage(data) {
-    const msg = {
-      styleById: data?.style?.styleParamsByConfigId || data?.styleById || {},
-      fieldsByConfigId: data?.fieldsByConfigId || {},
-      tables: data?.tables || {}
-    };
-    // Defaults alineados al Config.json (sin 'hierarchy')
-    const s = msg.styleById;
-    msg.styleById = {
-      nivelJerarquia: { value: s?.nivelJerarquia?.value ?? 'Barrio' },
-      colorScale:     { value: s?.colorScale?.value ?? 'greenToRed' },
-      invertScale:    { value: !!s?.invertScale?.value },
-      showLabels:     { value: !!s?.showLabels?.value },
-      showLegend:     { value: s?.showLegend?.value ?? true },
-      borderColor:    { value: { color: s?.borderColor?.value?.color ?? '#000000' } },
-      borderWidth:    { value: Number(s?.borderWidth?.value ?? 1) }
-    };
-    return msg;
-  }
-
-  if (dscc && dscc.subscribeToData) {
-    // objectTransform expone styleById/fieldsByConfigId
-    dscc.subscribeToData((data) => {
-      try {
-        const message = normalizeMessage(data);
-        // Si tu drawVisualization acepta (container, message), pasalo:
-        if (drawVisualization.length >= 2) {
-          drawVisualization(container, message);
-        } else {
-          // Compat 1 parámetro: dejamos el message en global por si lo lees adentro
-          window.__vizMessage = message;
-          drawVisualization(container);
-        }
-      } catch (err) {
-        console.error('[Wrapper inline] Render error:', err);
-      }
-    }, { transform: dscc.objectTransform });
-  } else {
-    // Dev local fuera de Looker: render por defecto
-    if (drawVisualization.length >= 2) {
-      drawVisualization(container, {}); // sin message
-    } else {
-      drawVisualization(container);
-    }
-  }
-} catch (e) {
-  console.warn('[Wrapper inline] No se pudo inicializar la suscripción:', e);
 }
