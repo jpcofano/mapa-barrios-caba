@@ -95,3 +95,67 @@ export default function drawVisualization(container, message = {}) {
 if (typeof window !== 'undefined') {
   window.drawVisualization = drawVisualization;
 }
+// --- WRAPPER INLINE PARA LOOKER STUDIO ---
+try {
+  // Carga perezosa de dscc si está disponible (dev vs prod)
+  // En prod Looker expone la subscripción; si no, no rompe.
+  // @ts-ignore
+  const dscc = window.dscc || (typeof require !== 'undefined' ? require('@google/dscc') : null);
+
+  const container = document.getElementById('container') || (function () {
+    const div = document.createElement('div');
+    div.id = 'container';
+    div.style.width = '100%';
+    div.style.height = '100%';
+    document.body.appendChild(div);
+    return div;
+  })();
+
+  function normalizeMessage(data) {
+    const msg = {
+      styleById: data?.style?.styleParamsByConfigId || data?.styleById || {},
+      fieldsByConfigId: data?.fieldsByConfigId || {},
+      tables: data?.tables || {}
+    };
+    // Defaults alineados al Config.json (sin 'hierarchy')
+    const s = msg.styleById;
+    msg.styleById = {
+      nivelJerarquia: { value: s?.nivelJerarquia?.value ?? 'barrio' },
+      colorScale:     { value: s?.colorScale?.value ?? 'greenToRed' },
+      invertScale:    { value: !!s?.invertScale?.value },
+      showLabels:     { value: !!s?.showLabels?.value },
+      showLegend:     { value: s?.showLegend?.value ?? true },
+      borderColor:    { value: { color: s?.borderColor?.value?.color ?? '#000000' } },
+      borderWidth:    { value: Number(s?.borderWidth?.value ?? 1) }
+    };
+    return msg;
+  }
+
+  if (dscc && dscc.subscribeToData) {
+    // objectTransform expone styleById/fieldsByConfigId
+    dscc.subscribeToData((data) => {
+      try {
+        const message = normalizeMessage(data);
+        // Si tu drawVisualization acepta (container, message), pasalo:
+        if (drawVisualization.length >= 2) {
+          drawVisualization(container, message);
+        } else {
+          // Compat 1 parámetro: dejamos el message en global por si lo lees adentro
+          window.__vizMessage = message;
+          drawVisualization(container);
+        }
+      } catch (err) {
+        console.error('[Wrapper inline] Render error:', err);
+      }
+    }, { transform: dscc.objectTransform });
+  } else {
+    // Dev local fuera de Looker: render por defecto
+    if (drawVisualization.length >= 2) {
+      drawVisualization(container, {}); // sin message
+    } else {
+      drawVisualization(container);
+    }
+  }
+} catch (e) {
+  console.warn('[Wrapper inline] No se pudo inicializar la suscripción:', e);
+}
