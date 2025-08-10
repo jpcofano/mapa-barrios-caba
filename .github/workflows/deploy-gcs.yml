@@ -45,20 +45,20 @@ jobs:
 
       # Sincroniza SOLO dist/ → bucket. Borra lo que ya no existe (-d)
       # y establece no-cache para evitar caching mientras probás.
-      - name: Sync dist → GCS bucket (no-cache)
+      # Sincroniza SOLO dist/ → bucket y borra lo que no existe
+      - name: Sync dist → GCS bucket
         env:
           GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
         run: |
           if [ ! -d "${SYNC_DIR}" ]; then
             echo "No existe ${SYNC_DIR}. ¿Falló el build?" && exit 1
           fi
-          # Evita subir node_modules, etc. (solo dist/)
-          gsutil -m rsync -r -d -x ".*" \
-            -h "Cache-Control:no-store, max-age=0" \
-            "${SYNC_DIR}" "gs://${GCS_BUCKET}"
+          gsutil -m rsync -r -d "${SYNC_DIR}" "gs://${GCS_BUCKET}"
 
-      # (Opcional) Lista qué quedó en el bucket para auditar
-      - name: Listado final en bucket
+      # (Dev) Forzar no-cache para ver cambios al instante
+      - name: Set no-cache headers
         env:
           GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
-        run: gsutil ls -r "gs://${GCS_BUCKET}"
+        run: |
+          gsutil -m setmeta -r -h "Cache-Control: no-store, max-age=0" "gs://${GCS_BUCKET}"
+
