@@ -23,5 +23,8 @@ export default defineConfig({
         entryFileNames: 'Visualization.js'
       }
     }
+  },
+  test: {
+    environment: 'jsdom'
   }
 });
