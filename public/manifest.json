@@ -1,25 +1,23 @@
 {
-  "name": "Mapa de barrios CABA",
-  "organization": "jpcofano",
-  "description": "Mapa coroplético de los barrios de CABA para Looker Studio.",
+  "name": "Barrios CABA Map",
+  "organization": "Tu Org",
+  "description": "Mapa de barrios CABA con coropletas",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
-  "packageUrl": "https://github.com/jpcofano/mapa-barrios-caba",
+  "organizationUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
-  "version": "1.0.2",
+  "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/",
   "devMode": true,
   "components": [
     {
-      "id": "barrios-caba-map",
-      "name": "Mapa de Barrios CABA",
-      "description": "Visualización de barrios de CABA con GeoJSON.",
+      "id": "barrios-caba-map-v2025",
+      "name": "Mapa Barrios CABA",
+      "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
       "resource": {
-        "js": "gs://mapa-barrios-degcba/Visualization.js",
+        "js": "gs://mapa-barrios-degcba/Visualization.bundle.js",
         "config": "gs://mapa-barrios-degcba/Config.json",
-        "type": "js",     "url": "https://storage.googleapis.com/mapa-barrios-degcba/barrioscaba.js", 
-        "css": "gs://mapa-barrios-degcba/Visualization.css",
-        "type": "image",  "url": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png"
+        "css": "gs://mapa-barrios-degcba/Visualization.css"
       }
     }
   ]
