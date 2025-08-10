@@ -45,4 +45,7 @@
       ]
     }
   ],
-  "features": { "enableCompariso
+  "features": {
+    "enableComparison": true
+  }
+}

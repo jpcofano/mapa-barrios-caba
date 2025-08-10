@@ -6,6 +6,7 @@
   "packageUrl": "https://github.com/jpcofano/mapa-barrios-caba",
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
+  "version": "1.0.2",
   "devMode": true,
   "components": [
     {
