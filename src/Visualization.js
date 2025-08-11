@@ -145,11 +145,11 @@ function toNumber(v) {
 // 2) buildValueMap con logs y conversión robusta (soporta rows como objeto o array)
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
-// Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
-const fieldsCfg = message?.fieldsByConfigId?.mainData || [];
-const fieldsTbl = message?.tables?.DEFAULT?.fields || [];
-const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
-const rows   = (message?.tables?.DEFAULT?.rows) || [];
+  // Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
+  const fieldsCfg = message?.fieldsByConfigId?.mainData || [];
+  const fieldsTbl = message?.tables?.DEFAULT?.fields || [];
+  const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
+  const rows   = (message?.tables?.DEFAULT?.rows) || [];
 
 
     console.info('[Viz] rows:', rows.length);
@@ -229,7 +229,11 @@ if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
 
 console.info('[Viz] stats:', { size, min, max });
 return { map, min, max };
-
+  } catch (err) {
+    console.error('[Viz] Error en buildValueMap:', err);
+    return null;
+  }
+} // ✅ ← Cierra aquí la función correctamente
 
 console.info('[Viz] drawVisualization()');
 
