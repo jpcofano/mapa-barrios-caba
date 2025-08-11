@@ -107,9 +107,16 @@ function getFeatureName(feature, nivelJerarquia = 'barrio') {
 }
 
 // 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
+// 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
 function toNumber(v) {
   if (v == null) return NaN;
-  const s = String(v).trim().replace(/\s+/g, '').replace(',', '.');
+  let s = String(v).trim();
+  // quitar espacios/miles y normalizar coma/punto (conserva el separador decimal final)
+  s = s.replace(/\s+/g, '');
+  if (/[.,]/.test(s)) {
+    const last = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+    s = s.replace(/[.,]/g, (m, idx) => (idx === s.lastIndexOf(last) ? '.' : ''));
+  }
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
 }
@@ -117,6 +124,8 @@ function toNumber(v) {
 
 // Espera transform: dscc.objectTransform
 // 2) buildValueMap con logs y conversión robusta
+// Espera transform: dscc.objectTransform
+// 2) buildValueMap con logs y conversión robusta (soporta rows como objeto o array)
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
     const fields = (message?.fieldsByConfigId?.mainData) || [];
@@ -136,15 +145,43 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
 
     const dimField    = findDim();
     const metricField = fields.find(f => f.concept === 'METRIC');
-    console.info('[Viz] fields:', { dimId: dimField?.id, metricId: metricField?.id });
+    console.info('[Viz] fields:', {
+      dimId: dimField?.id, dimConfigId: dimField?.configId,
+      metricId: metricField?.id, metricConfigId: metricField?.configId
+    });
     if (!dimField?.id || !metricField?.id) return null;
+
+    // índices posicionales por si rows vienen como arrays
+    const dimIdx    = fields.findIndex(f => f.id === dimField.id);
+    const metricIdx = fields.findIndex(f => f.id === metricField.id);
 
     const map = new Map();
     let min = Infinity, max = -Infinity;
 
+    // helper para leer una celda sin asumir shape
+    const getCell = (row, fieldObj, idx) => {
+      if (row == null) return undefined;
+      // objeto por field.id
+      if (row && typeof row === 'object' && !Array.isArray(row) && fieldObj?.id in row) {
+        return row[fieldObj.id];
+      }
+      // array posicional
+      if (Array.isArray(row) && idx >= 0) {
+        return row[idx];
+      }
+      return undefined;
+    };
+
+    // log de shape (solo 1 fila)
+    if (rows.length) {
+      const r0 = rows[0];
+      console.info('[Viz] row[0] shape:', Array.isArray(r0) ? 'array' : typeof r0);
+      console.info('[Viz] sample dim:', getCell(r0, dimField, dimIdx), 'metric:', getCell(r0, metricField, metricIdx));
+    }
+
     for (const r of rows) {
-      const keyRaw = r[dimField.id];
-      const val    = toNumber(r[metricField.id]);
+      const keyRaw = getCell(r, dimField, dimIdx);
+      const val    = toNumber(getCell(r, metricField, metricIdx));
       if (keyRaw == null || !Number.isFinite(val)) continue;
       const k = normalizeKey(keyRaw);
       map.set(k, val);
@@ -170,8 +207,6 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
     return null;
   }
 }
-
-
 
 console.info('[Viz] drawVisualization()');
 
