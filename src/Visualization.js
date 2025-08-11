@@ -178,30 +178,34 @@ export default function drawVisualization(container, message = {}) {
 console.info('[Viz] fieldsByConfigId', message?.fieldsByConfigId);
 console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
-  // Join barrio → valor (si hay datos)
-const stats = buildValueMap(message, nivel);
+// --- Diagnóstico de datos y GeoJSON ---
+// 1) Filas y campos
+const fields = message?.fieldsByConfigId?.mainData ?? [];
+const rows   = message?.tables?.DEFAULT?.rows ?? [];
+console.info('[Viz] rows:', rows.length);
+console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, type: f?.type })));
 
-// Punto 3: log de claves para comparar DIMENSIÓN ↔ GeoJSON
+// 2) Join barrio→valor y stats
+const stats = (() => {
+  try { return buildValueMap(message, nivel); }
+  catch (e) { console.warn('[Viz] buildValueMap error:', e); return null; }
+})();
+const size = stats?.map instanceof Map ? stats.map.size : 0;
+console.info('[Viz] valueMap:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
+
+// 3) Comparar 2 claves de datos vs 2 claves del GeoJSON
 try {
-  const dataKeys = stats ? Array.from(stats.map.keys()).slice(0, 2) : [];
-  const gjKeys = (GEOJSON?.features || [])
-    .slice(0, 2)
-    .map(f => normalizeKey(getFeatureName(f, nivel)));
+  const dataKeys = size ? Array.from(stats.map.keys()).slice(0, 2) : [];
+  const feats = Array.isArray(GEOJSON?.features) ? GEOJSON.features : [];
+  const gjKeys = feats.slice(0, 2).map(f => {
+    const name = getFeatureName?.(f, nivel);
+    return normalizeKey?.(name) ?? '(null)';
+  });
   console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
 } catch (err) {
   console.warn('[Viz] sampleKeys error:', err);
 }
 
-// 3) Antes de crear la capa, log de claves para comparar
-// (dejalo donde pusimos el styleFn)
-const stats = buildValueMap(message, nivel);
-
-// Muestra 2 claves de datos y 2 del GeoJSON normalizadas
-try {
-  const dataKeys = stats ? Array.from(stats.map.keys()).slice(0, 2) : [];
-  const gjKeys = (GEOJSON?.features || []).slice(0, 2).map(f => normalizeKey(getFeatureName(f, nivel)));
-  console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
-} catch {}
 
 
 // 4) styleFn (sin cambios lógicos, solo usa stats si existe)
