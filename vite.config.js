@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 
 export default {
   base: '/',                 // se sirve embebido por Looker Studio
+  assetsInclude: ['**/*.geojson'],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
