@@ -3,7 +3,8 @@
     "origin": [
       "https://lookerstudio.google.com",
       "https://datastudio.google.com",
-      "https://storage.googleapis.com/"
+      "https://storage.googleapis.com/",
+      "https://lookerstudio.googleusercontent.com/"
     ],
     "responseHeader": [
       "Content-Type",

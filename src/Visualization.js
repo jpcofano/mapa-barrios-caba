@@ -128,8 +128,13 @@ function toNumber(v) {
 // 2) buildValueMap con logs y conversión robusta (soporta rows como objeto o array)
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
-    const fields = (message?.fieldsByConfigId?.mainData) || [];
-    const rows   = (message?.tables?.DEFAULT?.rows) || [];
+// Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
+const fieldsCfg = message?.fieldsByConfigId?.mainData || [];
+const fieldsTbl = message?.tables?.DEFAULT?.fields || [];
+const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
+const rows   = (message?.tables?.DEFAULT?.rows) || [];
+
+
     console.info('[Viz] rows:', rows.length);
 
     if (!Array.isArray(fields) || !Array.isArray(rows) || !fields.length || !rows.length) return null;
@@ -251,8 +256,12 @@ console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
 // --- Diagnóstico de datos y GeoJSON ---
 // --- Diagnóstico mínimo + stats con cache ---
-const fields = message?.fieldsByConfigId?.mainData ?? [];
+// Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
+const fieldsCfg = message?.fieldsByConfigId?.mainData ?? [];
+const fieldsTbl = message?.tables?.DEFAULT?.fields ?? [];
+const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
 const rows   = message?.tables?.DEFAULT?.rows ?? [];
+
 console.info('[Viz] rows:', rows.length);
 console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));
 
