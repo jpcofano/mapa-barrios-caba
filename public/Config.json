@@ -4,24 +4,9 @@
       "id": "mainData",
       "label": "Datos del Mapa",
       "elements": [
-        {
-          "id": "barrio",
-          "label": "Barrio / Comuna (texto o número)",
-          "type": "DIMENSION",
-          "options": { "min": 1, "max": 1 }
-        },
-        {
-          "id": "valor",
-          "label": "Valor (métrica)",
-          "type": "METRIC",
-          "options": { "min": 1, "max": 1 }
-        },
-        {
-          "id": "maxRows",
-          "label": "Máximo de filas",
-          "type": "MAX_RESULTS",
-          "options": { "max": 5000 }
-        }
+        { "id": "barrio", "label": "Barrio / Comuna (texto o número)", "type": "DIMENSION", "options": { "min": 1, "max": 1 } },
+        { "id": "valor", "label": "Valor (métrica)", "type": "METRIC", "options": { "min": 1, "max": 1 } },
+        { "id": "maxRows", "label": "Máximo de filas", "type": "MAX_RESULTS", "options": { "max": 5000 } }
       ]
     }
   ],
@@ -46,17 +31,17 @@
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Amarillo → Rojo", "value": "yellow" },
-            { "label": "Verde → Rojo",    "value": "greenToRed" },
+            { "label": "Verde → Rojo", "value": "greenToRed" },
             { "label": "Azul → Amarillo", "value": "blueToYellow" },
-            { "label": "Escala de grises","value": "grayscale" }
+            { "label": "Escala de grises", "value": "grayscale" }
           ],
           "defaultValue": "greenToRed"
         },
         { "id": "invertScale", "label": "Invertir escala", "type": "CHECKBOX", "defaultValue": false },
-        { "id": "showLabels",  "label": "Mostrar etiquetas", "type": "CHECKBOX", "defaultValue": false },
-        { "id": "showLegend",  "label": "Mostrar leyenda",   "type": "CHECKBOX", "defaultValue": true },
-        { "id": "borderColor", "label": "Color del borde",   "type": "BORDER_COLOR", "defaultValue": { "color": "#000000" } },
-        { "id": "borderWidth", "label": "Ancho del borde",   "type": "LINE_WEIGHT",  "defaultValue": 1 }
+        { "id": "showLabels", "label": "Mostrar etiquetas", "type": "CHECKBOX", "defaultValue": false },
+        { "id": "showLegend", "label": "Mostrar leyenda", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "borderColor", "label": "Color del borde", "type": "BORDER_COLOR", "defaultValue": { "color": "#000000" } },
+        { "id": "borderWidth", "label": "Ancho del borde", "type": "LINE_WEIGHT", "defaultValue": 1 }
       ]
     }
   ]
