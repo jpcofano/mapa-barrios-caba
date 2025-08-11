@@ -87,6 +87,10 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
     const fields = message?.fieldsByConfigId?.mainData ?? [];
     const rows = message?.tables?.DEFAULT?.rows ?? [];
+      if (!Array.isArray(fields) || !Array.isArray(rows) || !fields.length || !rows.length) {
+    console.warn('[Viz] buildValueMap: sin datos o campos vacíos');
+    return null;
+  }
     if (!fields.length || !rows.length) return null;
 
     // DIMENSIÓN: si es comuna, intentamos un field llamado 'comuna' o similar
@@ -134,6 +138,7 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
   }
 }
 
+console.info('[Viz] drawVisualization()');
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
@@ -156,6 +161,8 @@ export default function drawVisualization(container, message = {}) {
     L.rectangle([[-34.75, -58.55], [-34.48, -58.25]], { color: '#bbb', weight: 1, fillOpacity: 0.05 }).addTo(map);
     return;
   }
+console.info('[Viz] fieldsByConfigId', message?.fieldsByConfigId);
+console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
   // Join barrio → valor (si hay datos)
 const stats = buildValueMap(message, nivel);
@@ -180,7 +187,7 @@ const styleFn = (feature) => {
     fillOpacity: 0.45
   };
 };
-
+console.info('[Viz] style', style, 'nivel', nivel);
 // Crea la capa SIN .addTo(map)
 const layer = L.geoJSON(GEOJSON, {
   style: styleFn,
