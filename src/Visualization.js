@@ -235,24 +235,7 @@ return { map, min, max };
   }
 } // ✅ ← Cierra aquí la función correctamente
 
-console.info('[Viz] drawVisualization()');
 
-// Log de claves de datos
-if (stats?.map instanceof Map) {
-  console.info('[Debug] Claves en stats.map:', Array.from(stats.map.keys()).slice(0, 10));
-} else {
-  console.info('[Debug] Claves en stats.map: (sin datos)');
-}
-
-// Log de claves en GeoJSON
-if (geojson?.features?.length) {
-  console.info('[Debug] Claves en GeoJSON:', geojson.features
-    .slice(0, 10)
-    .map(f => getFeatureName(f, nivelJerarquia))
-  );
-} else {
-  console.info('[Debug] Claves en GeoJSON: (sin features)');
-}
 
 
 // ---------------------- Render principal ----------------------
@@ -276,143 +259,54 @@ function drawVisualization(container, message = {}) {
     L.rectangle([[-34.75, -58.55], [-34.48, -58.25]], { color: '#bbb', weight: 1, fillOpacity: 0.05 }).addTo(map);
     return;
   }
-console.info('[Viz] fieldsByConfigId', message?.fieldsByConfigId);
-console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
-// --- Diagnóstico de datos y GeoJSON ---
-// --- Diagnóstico mínimo + stats con cache ---
-// Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
-const fieldsCfg = message?.fieldsByConfigId?.mainData ?? [];
-const fieldsTbl = message?.tables?.DEFAULT?.fields ?? [];
-const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
-const rows   = message?.tables?.DEFAULT?.rows ?? [];
+  console.info('[Viz] fieldsByConfigId', message?.fieldsByConfigId);
+  console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
+  // --- Diagnóstico mínimo + stats con cache ---
+  // Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
+  const fieldsCfg = message?.fieldsByConfigId?.mainData ?? [];
+  const fieldsTbl = message?.tables?.DEFAULT?.fields ?? [];
+  const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
+  const rows   = message?.tables?.DEFAULT?.rows ?? [];
 
-console.info('[Viz] rows:', rows.length);
-console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));
+  console.info('[Viz] rows:', rows.length);
+  console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));
 
-// --- Stats (ÚNICO) con cache para evitar parpadeos cuando rows=0 ---
-const statsRaw = buildValueMap(message, nivel);
-const stats    = statsRaw || LAST_STATS || null;
-if (statsRaw) LAST_STATS = statsRaw;
+  // --- Stats (ÚNICO) con cache para evitar parpadeos cuando rows=0 ---
+  const statsRaw = buildValueMap(message, nivel);
+  const stats    = statsRaw || LAST_STATS || null;
+  if (statsRaw) LAST_STATS = statsRaw;
 
-const size = (stats?.map instanceof Map) ? stats.map.size : 0;
-console.info('[Viz] stats.map:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
+  const size = (stats?.map instanceof Map) ? stats.map.size : 0;
+  console.info('[Viz] stats.map:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
 
-// Muestra 2 claves de datos vs 2 del GeoJSON (diagnóstico)
-try {
-  const dataKeys = size ? Array.from(stats.map.keys()).slice(0, 2) : [];
-  const gjKeys = (GEOJSON?.features || [])
-    .slice(0, 2)
-    .map(f => normalizeKey(getFeatureName(f, nivel)));
-  console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
-} catch (err) {
-  console.warn('[Viz] sampleKeys error:', err);
-}
-
-
-
-
-// 4) styleFn (sin cambios lógicos, solo usa stats si existe)
-const styleFn = (feature) => {
-  const nombre = getFeatureName(feature, nivel);
-  const keys = normalizeKeyFuzzy(nombre);
-
-  let v = undefined;
-  if (stats?.map?.size) {
-    for (const k of keys) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+  // Diagnósticos útiles (seguros)
+  console.info('[Viz] drawVisualization()');
+  if (stats?.map instanceof Map) {
+    console.info('[Debug] Claves en stats.map:', Array.from(stats.map.keys()).slice(0, 10));
+  } else {
+    console.info('[Debug] Claves en stats.map: (sin datos)');
   }
 
-  // Si no hay stats o no hay valor para el polígono, usar un punto medio fijo
-  let t = 0.4;
-  if (stats?.map?.size && Number.isFinite(v)) {
-    const denom = (stats.max - stats.min);
-    t = denom ? (v - stats.min) / denom : 0.5;
+  if (GEOJSON?.features?.length) {
+    console.info('[Debug] Claves en GeoJSON:', GEOJSON.features
+      .slice(0, 10)
+      .map(f => getFeatureName(f, nivel)));
+  } else {
+    console.info('[Debug] Claves en GeoJSON: (sin features)');
   }
 
-  return {
-    color: style.borderColor,
-    weight: style.borderWidth,
-    fillColor: colorFromScale(style.colorScale, t, style.invertScale),
-    fillOpacity: 0.45
-  };
-};
-
-
-
-
-
-console.info('[Viz] style', style, 'nivel', nivel);
-// Crea la capa SIN .addTo(map)
-const layer = L.geoJSON(GEOJSON, {
-  style: styleFn,
-  onEachFeature: (feature, lyr) => {
-    const nombre = getFeatureName(feature, nivel) ?? '—';
-    if (style.showLabels) {
-      lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
-    }
-    if (stats?.map?.size) {
-      // mostrar el valor encontrado (si lo hubo) con fuzzy
-      const keys = normalizeKeyFuzzy(nombre);
-      let v;
-      for (const k of keys) if (stats.map.has(k)) { v = stats.map.get(k); break; }
-      lyr.bindPopup(`<strong>${nombre}</strong><br/>Valor: ${v != null ? v : 's/d'}`, { closeButton: false });
-    } else {
-      lyr.bindPopup(`<strong>${nombre}</strong>`, { closeButton: false });
-    }
-  }
-}).addTo(map);
-
-// cobertura: cuántos polígonos tienen valor
-if (stats?.map?.size) {
-  let colored = 0;
-  for (const f of GEOJSON.features || []) {
-    const keys = normalizeKeyFuzzy(getFeatureName(f, nivel));
-    if (keys.some(k => stats.map.has(k))) colored++;
-  }
-  const total = GEOJSON.features?.length || 0;
-  console.info(`[Viz] cobertura coloreo: ${colored}/${total} (${total ? Math.round(colored*100/total) : 0}%)`);
-}
-
-
-
+  // Muestra 2 claves de datos vs 2 del GeoJSON (diagnóstico fino)
   try {
-    map.fitBounds(layer.getBounds(), { padding: [12, 12] });
-  } catch {}
-
-  if (style.showLegend) {
-    const legend = L.control({ position: 'bottomright' });
-    legend.onAdd = () => {
-      const div = L.DomUtil.create('div', 'legend');
-      Object.assign(div.style, {
-        background: 'white',
-        padding: '8px 10px',
-        borderRadius: '8px',
-        boxShadow: '0 1px 4px rgba(0,0,0,.25)',
-        font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-      });
-
-      const steps = 5, items = [];
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        const c = colorFromScale(style.colorScale, t, style.invertScale);
-        items.push(
-          `<div style="display:flex;align-items:center;gap:8px;">
-             <span style="display:inline-block;width:12px;height:12px;background:${c};border:1px solid #0001"></span>
-             <span>${Math.round(t*100)}%</span>
-           </div>`
-        );
-      }
-
-      div.innerHTML = `
-        <div style="margin-bottom:6px;"><strong>Escala</strong> · ${style.colorScale}${style.invertScale ? ' (invertida)' : ''}</div>
-        ${items.join('')}
-      `;
-      return div;
-    };
-    legend.addTo(map);
+    const dataKeys = size ? Array.from(stats.map.keys()).slice(0, 2) : [];
+    const gjKeys = (GEOJSON?.features || [])
+      .slice(0, 2)
+      .map(f => normalizeKey(getFeatureName(f, nivel)));
+    console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
+  } catch (err) {
+    console.warn('[Viz] sampleKeys error:', err);
   }
-}
 
 // ---------------------- Wrapper dscc (suscripción de datos) ----------------------
 (function initWrapper() {
