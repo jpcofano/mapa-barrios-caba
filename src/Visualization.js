@@ -81,62 +81,76 @@ function getFeatureName(feature, nivelJerarquia = 'barrio') {
   const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
   return anyStr ?? '—';
 }
+// 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
+function toNumber(v) {
+  if (v == null) return NaN;
+  const s = String(v).trim().replace(/\s+/g, '').replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
 
 // Espera transform: dscc.objectTransform
+// 2) buildValueMap con logs y conversión robusta
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
-    const fields = message?.fieldsByConfigId?.mainData ?? [];
-    const rows = message?.tables?.DEFAULT?.rows ?? [];
-      if (!Array.isArray(fields) || !Array.isArray(rows) || !fields.length || !rows.length) {
-    console.warn('[Viz] buildValueMap: sin datos o campos vacíos');
-    return null;
-  }
-    if (!fields.length || !rows.length) return null;
+    const fields = (message?.fieldsByConfigId?.mainData) || [];
+    const rows   = (message?.tables?.DEFAULT?.rows) || [];
 
-    // DIMENSIÓN: si es comuna, intentamos un field llamado 'comuna' o similar
+    console.info('[Viz] rows:', rows.length);
+
+    if (!Array.isArray(fields) || !Array.isArray(rows) || !fields.length || !rows.length) return null;
+
+    // Elegir DIM y METRIC
     const findDim = () => {
       if (nivelJerarquia === 'comuna') {
-        return fields.find(f =>
-          f.concept === 'DIMENSION' &&
-          /(comuna|codigo_?comuna|cod_?comuna)/i.test(f.configId || f.id)
-        ) || fields.find(f => f.concept === 'DIMENSION');
+        return fields.find(f => f.concept === 'DIMENSION' && /(comuna|codigo_?comuna|cod_?comuna)/i.test(f.configId || f.id))
+            || fields.find(f => f.concept === 'DIMENSION');
       }
-      // barrio
-      return fields.find(f =>
-        f.concept === 'DIMENSION' &&
-        /(barrio|nombre|name)/i.test(f.configId || f.id)
-      ) || fields.find(f => f.concept === 'DIMENSION');
+      return fields.find(f => f.concept === 'DIMENSION' && /(barrio|nombre|name)/i.test(f.configId || f.id))
+          || fields.find(f => f.concept === 'DIMENSION');
     };
 
-    const dimField   = findDim();
-    const metricField= fields.find(f => f.concept === 'METRIC');
+    const dimField    = findDim();
+    const metricField = fields.find(f => f.concept === 'METRIC');
+
+    console.info('[Viz] fields:', { dimId: dimField?.id, metricId: metricField?.id });
+
     if (!dimField?.id || !metricField?.id) return null;
 
     const map = new Map();
     let min = Infinity, max = -Infinity;
 
     for (const r of rows) {
+      // objectTransform => r es objeto: {<fieldId>: valor, ...}
       const keyRaw = r[dimField.id];
-      const val    = Number(r[metricField.id]);
+      const val    = toNumber(r[metricField.id]);
       if (keyRaw == null || !Number.isFinite(val)) continue;
+
       const k = normalizeKey(keyRaw);
       map.set(k, val);
       if (val < min) min = val;
       if (val > max) max = val;
     }
 
-    if (!map.size) return null;
+    const size = map.size;
+    if (!size) {
+      console.warn('[Viz] valueMap vacío (no hubo match de claves o métrica NaN)');
+      return null;
+    }
     if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+      console.warn('[Viz] rango degenerado, usando 0..1', { min, max });
+      console.info('[Viz] valueMap:', { size, min: 0, max: 1 });
       return { map, min: 0, max: 1 };
     }
-    console.info('[Viz] Filas:', rows.length, 'Keys con valor:', map.size, 'Rango:', min, '→', max,
-                 'Jerarquía:', nivelJerarquia, 'Dim:', dimField.id, 'Metric:', metricField.id);
+
+    console.info('[Viz] valueMap:', { size, min, max });
     return { map, min, max };
   } catch (e) {
     console.warn('buildValueMap error:', e);
     return null;
   }
 }
+
 
 console.info('[Viz] drawVisualization()');
 
@@ -167,6 +181,22 @@ console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
   // Join barrio → valor (si hay datos)
 const stats = buildValueMap(message, nivel);
 
+// Punto 3: log de claves para comparar DIMENSIÓN ↔ GeoJSON
+try {
+  const dataKeys = stats ? Array.from(stats.map.keys()).slice(0, 2) : [];
+  const gjKeys = (GEOJSON?.features || [])
+    .slice(0, 2)
+    .map(f => normalizeKey(getFeatureName(f, nivel)));
+  console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
+} catch (err) {
+  console.warn('[Viz] sampleKeys error:', err);
+}
+
+const styleFn = (feature) => {
+  // ...
+};
+
+// 4) styleFn (sin cambios lógicos, solo usa stats si existe)
 const styleFn = (feature) => {
   let fill = '#3388ff';
   const nombre = getFeatureName(feature, nivel);
@@ -187,6 +217,8 @@ const styleFn = (feature) => {
     fillOpacity: 0.45
   };
 };
+
+
 console.info('[Viz] style', style, 'nivel', nivel);
 // Crea la capa SIN .addTo(map)
 const layer = L.geoJSON(GEOJSON, {
