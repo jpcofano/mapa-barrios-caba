@@ -215,28 +215,41 @@ for (const r of rows) {
 
 
 
-    const size = map.size;
-    if (!size) {
-      console.warn('[Viz] valueMap vacío');
-      return null;
-    }
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-      console.warn('[Viz] rango degenerado, uso 0..1', { min, max });
-      console.info('[Viz] valueMap:', { size, min: 0, max: 1 });
-      return { map, min: 0, max: 1 };
-    }
-
-    console.info('[Viz] valueMap:', { size, min, max });
-    return { map, min, max };
-  } catch (e) {
-    console.warn('buildValueMap error:', e);
-    return null;
-  }
+const size = map.size;
+if (!size) {
+  console.warn('[Viz] stats.map vacío (sin filas válidas)');
+  return null;
+}
+if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+  console.warn('[Viz] rango degenerado; aplico 0..1', { min, max });
+  const out = { map, min: 0, max: 1 };
+  console.info('[Viz] stats:', { size, min: out.min, max: out.max });
+  return out;
 }
 
+console.info('[Viz] stats:', { size, min, max });
+return { map, min, max };
+
+
 console.info('[Viz] drawVisualization()');
-console.info('[Debug] Claves en valueMap:', Array.from(valueMap.map.keys()).slice(0, 10));
-console.info('[Debug] Claves en GeoJSON:', geojson.features.slice(0, 10).map(f => getFeatureName(f, nivelJerarquia)));
+
+// Log de claves de datos
+if (stats?.map instanceof Map) {
+  console.info('[Debug] Claves en stats.map:', Array.from(stats.map.keys()).slice(0, 10));
+} else {
+  console.info('[Debug] Claves en stats.map: (sin datos)');
+}
+
+// Log de claves en GeoJSON
+if (geojson?.features?.length) {
+  console.info('[Debug] Claves en GeoJSON:', geojson.features
+    .slice(0, 10)
+    .map(f => getFeatureName(f, nivelJerarquia))
+  );
+} else {
+  console.info('[Debug] Claves en GeoJSON: (sin features)');
+}
+
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
@@ -279,8 +292,8 @@ const statsRaw = buildValueMap(message, nivel);
 const stats    = statsRaw || LAST_STATS || null;
 if (statsRaw) LAST_STATS = statsRaw;
 
-const size = stats?.map instanceof Map ? stats.map.size : 0;
-console.info('[Viz] valueMap:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
+const size = (stats?.map instanceof Map) ? stats.map.size : 0;
+console.info('[Viz] stats.map:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
 
 // Muestra 2 claves de datos vs 2 del GeoJSON (diagnóstico)
 try {
