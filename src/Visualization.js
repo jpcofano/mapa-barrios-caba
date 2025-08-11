@@ -192,9 +192,17 @@ try {
   console.warn('[Viz] sampleKeys error:', err);
 }
 
-const styleFn = (feature) => {
-  // ...
-};
+// 3) Antes de crear la capa, log de claves para comparar
+// (dejalo donde pusimos el styleFn)
+const stats = buildValueMap(message, nivel);
+
+// Muestra 2 claves de datos y 2 del GeoJSON normalizadas
+try {
+  const dataKeys = stats ? Array.from(stats.map.keys()).slice(0, 2) : [];
+  const gjKeys = (GEOJSON?.features || []).slice(0, 2).map(f => normalizeKey(getFeatureName(f, nivel)));
+  console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
+} catch {}
+
 
 // 4) styleFn (sin cambios lógicos, solo usa stats si existe)
 const styleFn = (feature) => {
