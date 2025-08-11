@@ -1,107 +1,39 @@
 {
-  "data": [
-    {
-      "id": "mainData",
-      "fields": [
-        { "id": "dim",    "name": "Dimensión", "type": "TEXT",   "concept": "DIMENSION", "min": 1, "max": 1 },
-        { "id": "metric", "name": "Métrica",   "type": "NUMBER", "concept": "METRIC",    "min": 1, "max": 1 }
-      ]
-    }
-  ],
-  "style": {
-    "nivelJerarquia": {
-      "id": "nivelJerarquia",
-      "label": "Nivel de Jerarquía",
-      "type": "SELECT_SINGLE",
+  "style": [
+    { "id": "nivelJerarquia", "label": "Nivel", "type": "SELECT",
       "options": [
         { "label": "Barrio", "value": "barrio" },
         { "label": "Comuna", "value": "comuna" }
       ],
       "defaultValue": "barrio"
     },
-    "colorScale": {
-      "id": "colorScale",
-      "label": "Escala de color",
-      "type": "SELECT_SINGLE",
+    { "id": "colorScale", "label": "Escala de color", "type": "SELECT",
       "options": [
-        { "label": "Verde a Rojo", "value": "greenToRed" },
-        { "label": "Amarillo", "value": "yellow" },
-        { "label": "Azul a Amarillo", "value": "blueToYellow" },
-        { "label": "Escala de grises", "value": "grayscale" }
+        { "label": "Verde → Rojo", "value": "greenToRed" },
+        { "label": "Azul → Amarillo", "value": "blueToYellow" },
+        { "label": "Grises", "value": "grayscale" },
+        { "label": "Amarillos", "value": "yellow" }
       ],
       "defaultValue": "greenToRed"
     },
-    "invertScale": {
-      "id": "invertScale",
-      "label": "Invertir escala",
-      "type": "CHECKBOX",
-      "defaultValue": false
-    },
-    "showLabels": {
-      "id": "showLabels",
-      "label": "Mostrar etiquetas",
-      "type": "CHECKBOX",
-      "defaultValue": false
-    },
-    "showLegend": {
-      "id": "showLegend",
-      "label": "Mostrar leyenda",
-      "type": "CHECKBOX",
-      "defaultValue": true
-    },
-    "legendPosition": {
-      "id": "legendPosition",
-      "label": "Posición de la leyenda",
-      "type": "SELECT_SINGLE",
+    { "id": "invertScale", "label": "Invertir escala", "type": "CHECKBOX", "defaultValue": false },
+    { "id": "showLabels", "label": "Mostrar etiquetas", "type": "CHECKBOX", "defaultValue": true },
+    { "id": "showLegend", "label": "Mostrar leyenda", "type": "CHECKBOX", "defaultValue": true },
+    { "id": "legendPosition", "label": "Posición leyenda", "type": "SELECT",
       "options": [
-        { "label": "Inferior derecha", "value": "bottomright" },
-        { "label": "Inferior izquierda", "value": "bottomleft" },
-        { "label": "Superior derecha", "value": "topright" },
-        { "label": "Superior izquierda", "value": "topleft" }
+        { "label": "Arriba izq.", "value": "topleft" },
+        { "label": "Arriba der.", "value": "topright" },
+        { "label": "Abajo izq.", "value": "bottomleft" },
+        { "label": "Abajo der.", "value": "bottomright" }
       ],
       "defaultValue": "bottomright"
     },
-    "borderColor": {
-      "id": "borderColor",
-      "label": "Color de borde",
-      "type": "FILL_COLOR",
-      "defaultValue": { "color": "#000000" }
-    },
-    "borderWidth": {
-      "id": "borderWidth",
-      "label": "Ancho de borde",
-      "type": "NUMBER",
-      "defaultValue": 1
-    },
-    "borderOpacity": {
-      "id": "borderOpacity",
-      "label": "Opacidad del borde",
-      "type": "NUMBER",
-      "min": 0,
-      "max": 1,
-      "step": 0.05,
-      "defaultValue": 1
-    },
-    "opacity": {
-      "id": "opacity",
-      "label": "Opacidad de relleno",
-      "type": "NUMBER",
-      "min": 0,
-      "max": 1,
-      "step": 0.05,
-      "defaultValue": 0.45
-    },
-    "colorMissing": {
-      "id": "colorMissing",
-      "label": "Color para áreas sin datos",
-      "type": "FILL_COLOR",
-      "defaultValue": { "color": "#cccccc" }
-    },
-    "popupFormat": {
-      "id": "popupFormat",
-      "label": "Formato del popup",
-      "type": "TEXTINPUT",
-      "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
-    }
-  }
+    { "id": "borderColor", "label": "Color borde", "type": "COLOR", "defaultValue": { "color": "#000000" } },
+    { "id": "borderWidth", "label": "Grosor borde", "type": "SLIDER", "min": 0, "max": 6, "step": 1, "defaultValue": 1 },
+    { "id": "borderOpacity", "label": "Opacidad borde", "type": "SLIDER", "min": 0, "max": 1, "step": 0.05, "defaultValue": 1 },
+    { "id": "opacity", "label": "Opacidad relleno", "type": "SLIDER", "min": 0, "max": 1, "step": 0.05, "defaultValue": 0.45 },
+    { "id": "colorMissing", "label": "Color sin dato", "type": "COLOR", "defaultValue": { "color": "#cccccc" } },
+    { "id": "popupFormat", "label": "Formato popup", "type": "TEXTINPUT",
+      "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" }
+  ]
 }
