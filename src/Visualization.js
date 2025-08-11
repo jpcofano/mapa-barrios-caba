@@ -49,34 +49,73 @@ function colorFromScale(scaleName, t, invert = false) {
 }
 
 // ---------------------- Helpers de datos ----------------------
-function normalizeKey(s) {
-  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+function normalizeKey(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return s
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita acentos
+    .replace(/[^\w\s]/g, ' ')                         // quita signos
+    .replace(/\s+/g, ' ')                             // colapsa espacios
+    .trim()
+    .toUpperCase();
+}
+
+
+
+function getFeatureName(feature, nivelJerarquia = 'barrio') {
+  const p = feature?.properties || {};
+  if (nivelJerarquia === 'comuna') {
+    // COMUNA numérica → la pasamos a string normalizada
+    return p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
+  }
+  // BARRIO / NOMBRE (candidatos en varios estilos)
+  const candidates = [
+    p.nombre, p.NOMBRE, p.Nombre,
+    p.barrio, p.BARRIO, p.Barrio,
+    p.name, p.NOMBRE_BARRIO, p.barrio_nombre, p.barrio_desc
+  ];
+  for (const c of candidates) {
+    if (c != null && String(c).trim().length) return c;
+  }
+  // fallback: primer string en properties
+  const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
+  return anyStr ?? '—';
 }
 
 // Espera transform: dscc.objectTransform
-function buildValueMap(message) {
+function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
     const fields = message?.fieldsByConfigId?.mainData ?? [];
     const rows = message?.tables?.DEFAULT?.rows ?? [];
     if (!fields.length || !rows.length) return null;
 
-    const barrioField =
-      fields.find(f => (f.configId || f.id) === 'barrio' && f.concept === 'DIMENSION') ||
-      fields.find(f => f.concept === 'DIMENSION');
+    // DIMENSIÓN: si es comuna, intentamos un field llamado 'comuna' o similar
+    const findDim = () => {
+      if (nivelJerarquia === 'comuna') {
+        return fields.find(f =>
+          f.concept === 'DIMENSION' &&
+          /(comuna|codigo_?comuna|cod_?comuna)/i.test(f.configId || f.id)
+        ) || fields.find(f => f.concept === 'DIMENSION');
+      }
+      // barrio
+      return fields.find(f =>
+        f.concept === 'DIMENSION' &&
+        /(barrio|nombre|name)/i.test(f.configId || f.id)
+      ) || fields.find(f => f.concept === 'DIMENSION');
+    };
 
-    const metricField = fields.find(f => (f.configId || f.id) === 'valor' && f.concept === 'METRIC') ||
-                        fields.find(f => f.concept === 'METRIC');
-
-    if (!barrioField?.id || !metricField?.id) return null;
+    const dimField   = findDim();
+    const metricField= fields.find(f => f.concept === 'METRIC');
+    if (!dimField?.id || !metricField?.id) return null;
 
     const map = new Map();
     let min = Infinity, max = -Infinity;
 
     for (const r of rows) {
-      const barrio = r[barrioField.id];
-      const val = Number(r[metricField.id]);
-      if (barrio == null || !Number.isFinite(val)) continue;
-      const k = normalizeKey(barrio);
+      const keyRaw = r[dimField.id];
+      const val    = Number(r[metricField.id]);
+      if (keyRaw == null || !Number.isFinite(val)) continue;
+      const k = normalizeKey(keyRaw);
       map.set(k, val);
       if (val < min) min = val;
       if (val > max) max = val;
@@ -84,13 +123,17 @@ function buildValueMap(message) {
 
     if (!map.size) return null;
     if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-      return { map, min: 0, max: 1 }; // evita div/0
+      return { map, min: 0, max: 1 };
     }
+    console.info('[Viz] Filas:', rows.length, 'Keys con valor:', map.size, 'Rango:', min, '→', max,
+                 'Jerarquía:', nivelJerarquia, 'Dim:', dimField.id, 'Metric:', metricField.id);
     return { map, min, max };
-  } catch {
+  } catch (e) {
+    console.warn('buildValueMap error:', e);
     return null;
   }
 }
+
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
@@ -100,6 +143,7 @@ export default function drawVisualization(container, message = {}) {
   container.style.height = '100%';
 
   const style = readStyle(message);
+  const nivel = style.nivelJerarquia || 'barrio';
 
   // Mapa sin tiles (fondo blanco) — compatible CSP
   const map = L.map(container, { zoomControl: true, attributionControl: false })
@@ -114,43 +158,59 @@ export default function drawVisualization(container, message = {}) {
   }
 
   // Join barrio → valor (si hay datos)
-  const stats = buildValueMap(message);
+const stats = buildValueMap(message, nivel);
 
-  const styleFn = (feature) => {
-    let fill = '#3388ff';
-    if (stats?.map?.size) {
-      const nombre = feature?.properties?.BARRIO ?? feature?.properties?.barrio;
-      const k = normalizeKey(nombre);
-      const v = stats.map.get(k);
-      const t = Number.isFinite(v) ? (v - stats.min) / (stats.max - stats.min || 1) : 0.05;
-      fill = colorFromScale(style.colorScale, t, style.invertScale);
-    } else {
-      fill = colorFromScale(style.colorScale, 0.4, style.invertScale);
-    }
-    return {
-      color: style.borderColor,
-      weight: style.borderWidth,
-      fillColor: fill,
-      fillOpacity: 0.45
-    };
+const styleFn = (feature) => {
+  let fill = '#3388ff';
+  const nombre = getFeatureName(feature, nivel);
+  const k = normalizeKey(nombre);
+
+  if (stats?.map?.size) {
+    const v = stats.map.get(k);
+    const t = Number.isFinite(v) ? (v - stats.min) / (stats.max - stats.min || 1) : 0.05;
+    fill = colorFromScale(style.colorScale, t, style.invertScale);
+  } else {
+    fill = colorFromScale(style.colorScale, 0.4, style.invertScale);
+  }
+
+  return {
+    color: style.borderColor,
+    weight: style.borderWidth,
+    fillColor: fill,
+    fillOpacity: 0.45
   };
+};
 
-  const layer = L.geoJSON(data, {
-    style: styleFn,
-    onEachFeature: (feature, lyr) => {
-      const nombre = feature?.properties?.BARRIO ?? '—';
-      if (style.showLabels) {
-        lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
-      }
-      if (stats?.map?.size) {
-        const v = stats.map.get(normalizeKey(nombre));
-        const valTxt = (v != null ? v : 's/d');
-        lyr.bindPopup(`<strong>${nombre}</strong><br/>Valor: ${valTxt}`, { closeButton: false });
-      } else {
-        lyr.bindPopup(`<strong>${nombre}</strong>`, { closeButton: false });
-      }
+// Crea la capa SIN .addTo(map)
+const layer = L.geoJSON(GEOJSON, {
+  style: styleFn,
+  onEachFeature: (feature, lyr) => {
+    const nombre = getFeatureName(feature, nivel) ?? '—';
+    if (style.showLabels) {
+      lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
     }
-  }).addTo(map);
+    if (stats?.map?.size) {
+      const v = stats.map.get(normalizeKey(nombre));
+      lyr.bindPopup(`<strong>${nombre}</strong><br/>Valor: ${v != null ? v : 's/d'}`, { closeButton: false });
+    } else {
+      lyr.bindPopup(`<strong>${nombre}</strong>`, { closeButton: false });
+    }
+  }
+});
+
+// 🔍 Diagnóstico opcional (muestra hasta 10 barrios sin dato)
+if (stats?.map?.size) {
+  const missing = [];
+  GEOJSON.features?.forEach(f => {
+    const k = normalizeKey(getFeatureName(f, nivel));
+    if (!stats.map.has(k)) missing.push(k);
+  });
+  console.info('[Viz] Sin dato (10):', missing.slice(0,10), 'Total:', missing.length);
+}
+
+// Ahora sí, agregá la capa al mapa
+layer.addTo(map);
+
 
   try {
     map.fitBounds(layer.getBounds(), { padding: [12, 12] });
