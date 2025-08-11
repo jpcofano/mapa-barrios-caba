@@ -6,7 +6,24 @@ import 'leaflet/dist/leaflet.css';
 
 // Embebido del GeoJSON (Vite: ?raw devuelve string)
 import geojsonText from './barrioscaba.geojson?raw';
-const GEOJSON = JSON.parse(geojsonText);
+let GEOJSON = null;
+try {
+  if (typeof geojsonText !== 'string' || !geojsonText.length) {
+    console.error('[Viz] GeoJSON embebido vacío o no-string. typeof=', typeof geojsonText, 'len=', geojsonText?.length || 0);
+  } else {
+    console.info('[Viz] geojsonText len=', geojsonText.length, 'preview=', geojsonText.slice(0, 80));
+    GEOJSON = JSON.parse(geojsonText);
+  }
+} catch (e) {
+  console.error('[Viz] Error al parsear GeoJSON embebido:', e);
+}
+if (GEOJSON?.type !== 'FeatureCollection') {
+  console.warn('[Viz] GeoJSON no es FeatureCollection o no parseó:', GEOJSON);
+} else {
+  const n = Array.isArray(GEOJSON.features) ? GEOJSON.features.length : -1;
+  console.info('[Viz] GEOJSON OK · features=', n);
+}
+if (typeof window !== 'undefined') window.GEOJSON = GEOJSON;
 // Cache del último mapa válido para evitar “parpadeos” cuando rows=0
 let LAST_STATS = null;
 
@@ -218,6 +235,8 @@ for (const r of rows) {
 }
 
 console.info('[Viz] drawVisualization()');
+console.info('[Debug] Claves en valueMap:', Array.from(valueMap.map.keys()).slice(0, 10));
+console.info('[Debug] Claves en GeoJSON:', geojson.features.slice(0, 10).map(f => getFeatureName(f, nivelJerarquia)));
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
