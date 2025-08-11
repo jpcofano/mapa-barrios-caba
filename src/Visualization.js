@@ -7,6 +7,8 @@ import 'leaflet/dist/leaflet.css';
 // Embebido del GeoJSON (Vite: ?raw devuelve string)
 import geojsonText from './barrioscaba.geojson?raw';
 const GEOJSON = JSON.parse(geojsonText);
+// Cache del último mapa válido para evitar “parpadeos” cuando rows=0
+let LAST_STATS = null;
 
 // ---------------------- Helpers de estilo ----------------------
 function readStyle(message = {}) {
@@ -51,22 +53,44 @@ function colorFromScale(scaleName, t, invert = false) {
 // ---------------------- Helpers de datos ----------------------
 function normalizeKey(v) {
   if (v == null) return '';
-  const s = String(v);
-  return s
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita acentos
-    .replace(/[^\w\s]/g, ' ')                         // quita signos
+  return String(v)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // sin acentos
+    .replace(/[^\w\s]/g, ' ')                         // signos → espacio
     .replace(/\s+/g, ' ')                             // colapsa espacios
     .trim()
     .toUpperCase();
 }
+
+// Si no matchea directo, probamos variantes sin paréntesis/sufijos
+function normalizeKeyFuzzy(v) {
+  const base = normalizeKey(v);
+  const variants = [base];
+
+  // quita “(…)” al final
+  variants.push(base.replace(/\s*\([^)]*\)\s*$/, '').trim());
+
+  // quita “- …” o “, …” sufijos comunes
+  variants.push(base.replace(/\s*[-,].*$/, '').trim());
+
+  // quita la palabra CABA/CIUDAD si viniera
+  variants.push(base.replace(/\b(CABA|CIUDAD|CAPITAL FEDERAL)\b/g, '').replace(/\s+/g, ' ').trim());
+
+  // únicas y no vacías
+  return Array.from(new Set(variants.filter(x => x && x.length)));
+}
+
 
 
 
 function getFeatureName(feature, nivelJerarquia = 'barrio') {
   const p = feature?.properties || {};
   if (nivelJerarquia === 'comuna') {
-    // COMUNA numérica → la pasamos a string normalizada
-    return p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
+    // COMUNA numérica → string sin ceros a la izquierda
+    const raw = p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
+    if (raw == null) return raw;
+    const s = String(raw).trim();
+    const sinCeros = /^\d+$/.test(s) ? s.replace(/^0+/, '') : s;
+    return sinCeros;
   }
   // BARRIO / NOMBRE (candidatos en varios estilos)
   const candidates = [
@@ -81,6 +105,7 @@ function getFeatureName(feature, nivelJerarquia = 'barrio') {
   const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
   return anyStr ?? '—';
 }
+
 // 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
 function toNumber(v) {
   if (v == null) return NaN;
@@ -89,18 +114,17 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+
 // Espera transform: dscc.objectTransform
 // 2) buildValueMap con logs y conversión robusta
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
     const fields = (message?.fieldsByConfigId?.mainData) || [];
     const rows   = (message?.tables?.DEFAULT?.rows) || [];
-
     console.info('[Viz] rows:', rows.length);
 
     if (!Array.isArray(fields) || !Array.isArray(rows) || !fields.length || !rows.length) return null;
 
-    // Elegir DIM y METRIC
     const findDim = () => {
       if (nivelJerarquia === 'comuna') {
         return fields.find(f => f.concept === 'DIMENSION' && /(comuna|codigo_?comuna|cod_?comuna)/i.test(f.configId || f.id))
@@ -112,20 +136,16 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
 
     const dimField    = findDim();
     const metricField = fields.find(f => f.concept === 'METRIC');
-
     console.info('[Viz] fields:', { dimId: dimField?.id, metricId: metricField?.id });
-
     if (!dimField?.id || !metricField?.id) return null;
 
     const map = new Map();
     let min = Infinity, max = -Infinity;
 
     for (const r of rows) {
-      // objectTransform => r es objeto: {<fieldId>: valor, ...}
       const keyRaw = r[dimField.id];
       const val    = toNumber(r[metricField.id]);
       if (keyRaw == null || !Number.isFinite(val)) continue;
-
       const k = normalizeKey(keyRaw);
       map.set(k, val);
       if (val < min) min = val;
@@ -134,11 +154,11 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
 
     const size = map.size;
     if (!size) {
-      console.warn('[Viz] valueMap vacío (no hubo match de claves o métrica NaN)');
+      console.warn('[Viz] valueMap vacío');
       return null;
     }
     if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-      console.warn('[Viz] rango degenerado, usando 0..1', { min, max });
+      console.warn('[Viz] rango degenerado, uso 0..1', { min, max });
       console.info('[Viz] valueMap:', { size, min: 0, max: 1 });
       return { map, min: 0, max: 1 };
     }
@@ -150,6 +170,7 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
     return null;
   }
 }
+
 
 
 console.info('[Viz] drawVisualization()');
@@ -179,28 +200,25 @@ console.info('[Viz] fieldsByConfigId', message?.fieldsByConfigId);
 console.info('[Viz] rows', message?.tables?.DEFAULT?.rows?.length || 0);
 
 // --- Diagnóstico de datos y GeoJSON ---
-// 1) Filas y campos
+// --- Diagnóstico mínimo + stats con cache ---
 const fields = message?.fieldsByConfigId?.mainData ?? [];
 const rows   = message?.tables?.DEFAULT?.rows ?? [];
 console.info('[Viz] rows:', rows.length);
-console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, type: f?.type })));
+console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));
 
-// 2) Join barrio→valor y stats
-const stats = (() => {
-  try { return buildValueMap(message, nivel); }
-  catch (e) { console.warn('[Viz] buildValueMap error:', e); return null; }
-})();
+// Construcción con cache para evitar parpadeos cuando rows=0
+const statsRaw = buildValueMap(message, nivel);
+const stats = statsRaw || LAST_STATS || null;
+if (statsRaw) LAST_STATS = statsRaw;
+
 const size = stats?.map instanceof Map ? stats.map.size : 0;
 console.info('[Viz] valueMap:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
 
-// 3) Comparar 2 claves de datos vs 2 claves del GeoJSON
+// Claves de muestra (2 de datos vs 2 del GeoJSON) para verificar join
 try {
   const dataKeys = size ? Array.from(stats.map.keys()).slice(0, 2) : [];
-  const feats = Array.isArray(GEOJSON?.features) ? GEOJSON.features : [];
-  const gjKeys = feats.slice(0, 2).map(f => {
-    const name = getFeatureName?.(f, nivel);
-    return normalizeKey?.(name) ?? '(null)';
-  });
+  const gjKeys = (GEOJSON?.features || []).slice(0, 2)
+    .map(f => normalizeKey(getFeatureName(f, nivel)));
   console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
 } catch (err) {
   console.warn('[Viz] sampleKeys error:', err);
@@ -208,27 +226,33 @@ try {
 
 
 
+
 // 4) styleFn (sin cambios lógicos, solo usa stats si existe)
 const styleFn = (feature) => {
-  let fill = '#3388ff';
   const nombre = getFeatureName(feature, nivel);
-  const k = normalizeKey(nombre);
+  const keys = normalizeKeyFuzzy(nombre);
 
+  let v = undefined;
   if (stats?.map?.size) {
-    const v = stats.map.get(k);
-    const t = Number.isFinite(v) ? (v - stats.min) / (stats.max - stats.min || 1) : 0.05;
-    fill = colorFromScale(style.colorScale, t, style.invertScale);
-  } else {
-    fill = colorFromScale(style.colorScale, 0.4, style.invertScale);
+    for (const k of keys) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+  }
+
+  // Si no hay stats, o no se encontró valor para el polígono, usamos un punto medio fijo
+  let t = 0.4;
+  if (stats?.map?.size && Number.isFinite(v)) {
+    const denom = (stats.max - stats.min);
+    t = denom ? (v - stats.min) / denom : 0.5;
   }
 
   return {
     color: style.borderColor,
     weight: style.borderWidth,
-    fillColor: fill,
+    fillColor: colorFromScale(style.colorScale, t, style.invertScale),
     fillOpacity: 0.45
   };
 };
+
+
 
 
 console.info('[Viz] style', style, 'nivel', nivel);
@@ -241,26 +265,28 @@ const layer = L.geoJSON(GEOJSON, {
       lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
     }
     if (stats?.map?.size) {
-      const v = stats.map.get(normalizeKey(nombre));
+      // mostrar el valor encontrado (si lo hubo) con fuzzy
+      const keys = normalizeKeyFuzzy(nombre);
+      let v;
+      for (const k of keys) if (stats.map.has(k)) { v = stats.map.get(k); break; }
       lyr.bindPopup(`<strong>${nombre}</strong><br/>Valor: ${v != null ? v : 's/d'}`, { closeButton: false });
     } else {
       lyr.bindPopup(`<strong>${nombre}</strong>`, { closeButton: false });
     }
   }
-});
+}).addTo(map);
 
-// 🔍 Diagnóstico opcional (muestra hasta 10 barrios sin dato)
+// cobertura: cuántos polígonos tienen valor
 if (stats?.map?.size) {
-  const missing = [];
-  GEOJSON.features?.forEach(f => {
-    const k = normalizeKey(getFeatureName(f, nivel));
-    if (!stats.map.has(k)) missing.push(k);
-  });
-  console.info('[Viz] Sin dato (10):', missing.slice(0,10), 'Total:', missing.length);
+  let colored = 0;
+  for (const f of GEOJSON.features || []) {
+    const keys = normalizeKeyFuzzy(getFeatureName(f, nivel));
+    if (keys.some(k => stats.map.has(k))) colored++;
+  }
+  const total = GEOJSON.features?.length || 0;
+  console.info(`[Viz] cobertura coloreo: ${colored}/${total} (${total ? Math.round(colored*100/total) : 0}%)`);
 }
 
-// Ahora sí, agregá la capa al mapa
-layer.addTo(map);
 
 
   try {
