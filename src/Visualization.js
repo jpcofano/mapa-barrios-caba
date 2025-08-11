@@ -185,21 +185,9 @@ const rows   = (message?.tables?.DEFAULT?.rows) || [];
     }
 
 for (const r of rows) {
-  let keyRaw, valRaw;
+  const keyRaw = getCell(r, dimField, dimIdx);
+  const val    = toNumber(getCell(r, metricField, metricIdx));
 
-  if (Array.isArray(r)) {
-    // rows como array posicional
-    const dimIdx    = fields.findIndex(f => f.id === dimField.id);
-    const metricIdx = fields.findIndex(f => f.id === metricField.id);
-    keyRaw = dimIdx >= 0 ? r[dimIdx] : undefined;
-    valRaw = metricIdx >= 0 ? r[metricIdx] : undefined;
-  } else {
-    // rows como objeto
-    keyRaw = r[dimField.id];
-    valRaw = r[metricField.id];
-  }
-
-  const val = toNumber(valRaw);
   if (keyRaw == null || !Number.isFinite(val)) continue;
 
   const k = normalizeKey(keyRaw);
@@ -207,6 +195,7 @@ for (const r of rows) {
   if (val < min) min = val;
   if (val > max) max = val;
 }
+
 
 
     const size = map.size;
@@ -261,6 +250,7 @@ const fieldsCfg = message?.fieldsByConfigId?.mainData ?? [];
 const fieldsTbl = message?.tables?.DEFAULT?.fields ?? [];
 const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
 const rows   = message?.tables?.DEFAULT?.rows ?? [];
+
 
 console.info('[Viz] rows:', rows.length);
 console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));

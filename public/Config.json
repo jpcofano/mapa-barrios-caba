@@ -8,13 +8,13 @@
           "id": "barrio",
           "label": "Barrio (texto)",
           "type": "DIMENSION",
-          "options": { "min": 0, "max": 1, "supportedTypes": ["TEXT"] }
+          "options": { "min": 0, "max": 1}
         },
         {
           "id": "valor",
           "label": "Valor (métrica)",
           "type": "METRIC",
-          "options": { "min": 1, "max": 5, "supportedTypes": ["NUMBER"] }
+          "options": { "min": 1, "max": 1}
         },
         {
           "id": "maxRows",
