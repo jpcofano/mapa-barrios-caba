@@ -36,8 +36,13 @@ function readStyle(message = {}) {
     invertScale:    !!s?.invertScale?.value,
     showLabels:     !!s?.showLabels?.value,
     showLegend:     (s?.showLegend?.value ?? true),
+    legendPosition: s?.legendPosition?.value ?? 'bottomright',
     borderColor:    s?.borderColor?.value?.color ?? '#000000',
     borderWidth:    Number(s?.borderWidth?.value ?? 1),
+    borderOpacity:  Number(s?.borderOpacity?.value ?? 1),
+    opacity:        Number(s?.opacity?.value ?? 0.45),
+    colorMissing:   s?.colorMissing?.value?.color ?? '#cccccc',
+    popupFormat:    s?.popupFormat?.value ?? '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
   };
 }
 
@@ -73,7 +78,7 @@ function normalizeKey(v) {
   return String(v)
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // sin acentos
     .replace(/[^\w\s]/g, ' ')                         // signos → espacio
-    .replace(/\s+/g, ' ')                             // colapsa espacios
+    .replace(/\s+/g, ' ')                              // colapsa espacios
     .trim()
     .toUpperCase();
 }
@@ -95,9 +100,6 @@ function normalizeKeyFuzzy(v) {
   // únicas y no vacías
   return Array.from(new Set(variants.filter(x => x && x.length)));
 }
-
-
-
 
 function getFeatureName(feature, nivelJerarquia = 'barrio') {
   const p = feature?.properties || {};
@@ -124,7 +126,6 @@ function getFeatureName(feature, nivelJerarquia = 'barrio') {
 }
 
 // 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
-// 1) Conversión segura a número (soporta "1.234", "1,234", "1 234")
 function toNumber(v) {
   if (v == null) return NaN;
   let s = String(v).trim();
@@ -138,19 +139,14 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-
-// Espera transform: dscc.objectTransform
-// 2) buildValueMap con logs y conversión robusta
-// Espera transform: dscc.objectTransform
 // 2) buildValueMap con logs y conversión robusta (soporta rows como objeto o array)
 function buildValueMap(message, nivelJerarquia = 'barrio') {
   try {
-  // Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
-  const fieldsCfg = message?.fieldsByConfigId?.mainData || [];
-  const fieldsTbl = message?.tables?.DEFAULT?.fields || [];
-  const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
-  const rows   = (message?.tables?.DEFAULT?.rows) || [];
-
+    // Preferimos fieldsByConfigId.mainData, pero si viene vacío usamos tables.DEFAULT.fields
+    const fieldsCfg = message?.fieldsByConfigId?.mainData || [];
+    const fieldsTbl = message?.tables?.DEFAULT?.fields || [];
+    const fields = (Array.isArray(fieldsCfg) && fieldsCfg.length) ? fieldsCfg : fieldsTbl;
+    const rows   = (message?.tables?.DEFAULT?.rows) || [];
 
     console.info('[Viz] rows:', rows.length);
 
@@ -201,44 +197,41 @@ function buildValueMap(message, nivelJerarquia = 'barrio') {
       console.info('[Viz] sample dim:', getCell(r0, dimField, dimIdx), 'metric:', getCell(r0, metricField, metricIdx));
     }
 
-for (const r of rows) {
-  const keyRaw = getCell(r, dimField, dimIdx);
-  const val    = toNumber(getCell(r, metricField, metricIdx));
+    for (const r of rows) {
+      const keyRaw = getCell(r, dimField, dimIdx);
+      const val    = toNumber(getCell(r, metricField, metricIdx));
 
-  if (keyRaw == null || !Number.isFinite(val)) continue;
+      if (keyRaw == null || !Number.isFinite(val)) continue;
 
-  const k = normalizeKey(keyRaw);
-  map.set(k, val);
-  if (val < min) min = val;
-  if (val > max) max = val;
-}
+      const k = normalizeKey(keyRaw);
+      map.set(k, val);
+      if (val < min) min = val;
+      if (val > max) max = val;
+    }
 
+    const size = map.size;
+    if (!size) {
+      console.warn('[Viz] stats.map vacío (sin filas válidas)');
+      return null;
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
+      console.warn('[Viz] rango degenerado; aplico 0..1', { min, max });
+      const out = { map, min: 0, max: 1 };
+      console.info('[Viz] stats:', { size, min: out.min, max: out.max });
+      return out;
+    }
 
-
-const size = map.size;
-if (!size) {
-  console.warn('[Viz] stats.map vacío (sin filas válidas)');
-  return null;
-}
-if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) {
-  console.warn('[Viz] rango degenerado; aplico 0..1', { min, max });
-  const out = { map, min: 0, max: 1 };
-  console.info('[Viz] stats:', { size, min: out.min, max: out.max });
-  return out;
-}
-
-console.info('[Viz] stats:', { size, min, max });
-return { map, min, max };
+    console.info('[Viz] stats:', { size, min, max });
+    return { map, min, max };
   } catch (err) {
     console.error('[Viz] Error en buildValueMap:', err);
     return null;
   }
-} // ✅ ← Cierra aquí la función correctamente
+}
 
 // ---------------------- Render principal ----------------------
 console.info('[Viz] drawVisualization()');
 
-// ---------------------- Render principal ----------------------
 function drawVisualization(container, message = {}) {
   // Reset contenedor
   container.innerHTML = '';
@@ -290,28 +283,31 @@ function drawVisualization(container, message = {}) {
     console.warn('[Viz] sampleKeys error:', err);
   }
 
-  // styleFn
+  // ---------------- styleFn usando nuevas opciones ----------------
   const styleFn = (feature) => {
     const nombre = getFeatureName(feature, nivel);
     const keys = normalizeKeyFuzzy(nombre);
 
-    let v = undefined;
+    let v;
     if (stats?.map?.size) {
       for (const k of keys) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
     }
 
-    // Si no hay stats o no hay valor para el polígono, usar un punto medio fijo
-    let t = 0.4;
+    let fillColor;
     if (stats?.map?.size && Number.isFinite(v)) {
-      const denom = (stats.max - stats.min);
-      t = denom ? (v - stats.min) / denom : 0.5;
+      const denom = (stats.max - stats.min) || 1;
+      const t = (v - stats.min) / denom;
+      fillColor = colorFromScale(style.colorScale, t, style.invertScale);
+    } else {
+      fillColor = style.colorMissing; // nuevo color para “sin dato”
     }
 
     return {
       color: style.borderColor,
       weight: style.borderWidth,
-      fillColor: colorFromScale(style.colorScale, t, style.invertScale),
-      fillOpacity: 0.45
+      opacity: style.borderOpacity,     // opacidad del borde
+      fillColor,
+      fillOpacity: style.opacity        // opacidad de relleno
     };
   };
 
@@ -322,18 +318,22 @@ function drawVisualization(container, message = {}) {
     style: styleFn,
     onEachFeature: (feature, lyr) => {
       const nombre = getFeatureName(feature, nivel) ?? '—';
+
       if (style.showLabels) {
         lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
       }
+
+      let v; // valor encontrado si existe
       if (stats?.map?.size) {
-        // mostrar el valor encontrado (si lo hubo) con fuzzy
         const keys = normalizeKeyFuzzy(nombre);
-        let v;
         for (const k of keys) if (stats.map.has(k)) { v = stats.map.get(k); break; }
-        lyr.bindPopup(`<strong>${nombre}</strong><br/>Valor: ${v != null ? v : 's/d'}`, { closeButton: false });
-      } else {
-        lyr.bindPopup(`<strong>${nombre}</strong>`, { closeButton: false });
       }
+
+      const content = (style.popupFormat || '')
+        .replace(/\{\{\s*nombre\s*\}\}/gi, String(nombre))
+        .replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? String(v) : 's/d');
+
+      lyr.bindPopup(content, { closeButton: false });
     }
   }).addTo(map);
 
@@ -352,8 +352,9 @@ function drawVisualization(container, message = {}) {
     map.fitBounds(layer.getBounds(), { padding: [12, 12] });
   } catch {}
 
+  // ---------------- Leyenda con posición configurable ----------------
   if (style.showLegend) {
-    const legend = L.control({ position: 'bottomright' });
+    const legend = L.control({ position: style.legendPosition }); // usa SELECT
     legend.onAdd = () => {
       const div = L.DomUtil.create('div', 'legend');
       Object.assign(div.style, {
@@ -384,10 +385,7 @@ function drawVisualization(container, message = {}) {
     };
     legend.addTo(map);
   }
-} // <-- ¡Cierre de drawVisualization!
-
-
-
+}
 
 // ---------------------- Wrapper dscc (suscripción de datos) ----------------------
 (function initWrapper() {
@@ -439,5 +437,4 @@ function drawVisualization(container, message = {}) {
   } catch (e) {
     console.warn('[Viz] Wrapper init falló:', e);
   }
-})(); // <-- ¡Cierre del IIFE!
-
+})();

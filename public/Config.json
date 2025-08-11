@@ -1,26 +1,13 @@
 {
-  "data": {
-    "mainData": {
+  "data": [
+    {
+      "id": "mainData",
       "fields": [
-        {
-          "id": "dim",
-          "name": "Dimensión",
-          "type": "TEXT",
-          "concept": "DIMENSION",
-          "min": 1,
-          "max": 1
-        },
-        {
-          "id": "metric",
-          "name": "Métrica",
-          "type": "NUMBER",
-          "concept": "METRIC",
-          "min": 1,
-          "max": 1
-        }
+        { "id": "dim",    "name": "Dimensión", "type": "TEXT",   "concept": "DIMENSION", "min": 1, "max": 1 },
+        { "id": "metric", "name": "Métrica",   "type": "NUMBER", "concept": "METRIC",    "min": 1, "max": 1 }
       ]
     }
-  },
+  ],
   "style": {
     "nivelJerarquia": {
       "id": "nivelJerarquia",
@@ -62,6 +49,18 @@
       "type": "CHECKBOX",
       "defaultValue": true
     },
+    "legendPosition": {
+      "id": "legendPosition",
+      "label": "Posición de la leyenda",
+      "type": "SELECT_SINGLE",
+      "options": [
+        { "label": "Inferior derecha", "value": "bottomright" },
+        { "label": "Inferior izquierda", "value": "bottomleft" },
+        { "label": "Superior derecha", "value": "topright" },
+        { "label": "Superior izquierda", "value": "topleft" }
+      ],
+      "defaultValue": "bottomright"
+    },
     "borderColor": {
       "id": "borderColor",
       "label": "Color de borde",
@@ -73,6 +72,36 @@
       "label": "Ancho de borde",
       "type": "NUMBER",
       "defaultValue": 1
+    },
+    "borderOpacity": {
+      "id": "borderOpacity",
+      "label": "Opacidad del borde",
+      "type": "NUMBER",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "defaultValue": 1
+    },
+    "opacity": {
+      "id": "opacity",
+      "label": "Opacidad de relleno",
+      "type": "NUMBER",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "defaultValue": 0.45
+    },
+    "colorMissing": {
+      "id": "colorMissing",
+      "label": "Color para áreas sin datos",
+      "type": "FILL_COLOR",
+      "defaultValue": { "color": "#cccccc" }
+    },
+    "popupFormat": {
+      "id": "popupFormat",
+      "label": "Formato del popup",
+      "type": "TEXTINPUT",
+      "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
     }
   }
 }
