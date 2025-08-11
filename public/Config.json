@@ -6,15 +6,15 @@
       "elements": [
         {
           "id": "barrio",
-          "label": "Barrio (texto)",
+          "label": "Barrio / Comuna (texto o número)",
           "type": "DIMENSION",
-          "options": { "min": 0, "max": 1}
+          "options": { "min": 1, "max": 1 }
         },
         {
           "id": "valor",
           "label": "Valor (métrica)",
           "type": "METRIC",
-          "options": { "min": 1, "max": 1}
+          "options": { "min": 1, "max": 1 }
         },
         {
           "id": "maxRows",
@@ -30,6 +30,16 @@
       "id": "mapaEstilo",
       "label": "Opciones de Mapa",
       "elements": [
+        {
+          "id": "nivelJerarquia",
+          "label": "Nivel (barrio/comuna)",
+          "type": "SELECT_SINGLE",
+          "options": [
+            { "label": "Barrio", "value": "barrio" },
+            { "label": "Comuna", "value": "comuna" }
+          ],
+          "defaultValue": "barrio"
+        },
         {
           "id": "colorScale",
           "label": "Escala de color",
