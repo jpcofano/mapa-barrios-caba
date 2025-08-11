@@ -252,7 +252,7 @@ if (geojson?.features?.length) {
 
 
 // ---------------------- Render principal ----------------------
-export default function drawVisualization(container, message = {}) {
+function drawVisualization(container, message = {}) {
   // Reset contenedor
   container.innerHTML = '';
   container.style.width = '100%';
