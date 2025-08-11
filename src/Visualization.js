@@ -206,18 +206,19 @@ const rows   = message?.tables?.DEFAULT?.rows ?? [];
 console.info('[Viz] rows:', rows.length);
 console.info('[Viz] fields:', fields.map(f => ({ id: f?.id, name: f?.name, concept: f?.concept })));
 
-// Construcción con cache para evitar parpadeos cuando rows=0
+// --- Stats (ÚNICO) con cache para evitar parpadeos cuando rows=0 ---
 const statsRaw = buildValueMap(message, nivel);
-const stats = statsRaw || LAST_STATS || null;
+const stats    = statsRaw || LAST_STATS || null;
 if (statsRaw) LAST_STATS = statsRaw;
 
 const size = stats?.map instanceof Map ? stats.map.size : 0;
 console.info('[Viz] valueMap:', { size, min: stats?.min ?? null, max: stats?.max ?? null });
 
-// Claves de muestra (2 de datos vs 2 del GeoJSON) para verificar join
+// Muestra 2 claves de datos vs 2 del GeoJSON (diagnóstico)
 try {
   const dataKeys = size ? Array.from(stats.map.keys()).slice(0, 2) : [];
-  const gjKeys = (GEOJSON?.features || []).slice(0, 2)
+  const gjKeys = (GEOJSON?.features || [])
+    .slice(0, 2)
     .map(f => normalizeKey(getFeatureName(f, nivel)));
   console.info('[Viz] sampleKeys:', { data: dataKeys, geojson: gjKeys });
 } catch (err) {
@@ -237,7 +238,7 @@ const styleFn = (feature) => {
     for (const k of keys) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
   }
 
-  // Si no hay stats, o no se encontró valor para el polígono, usamos un punto medio fijo
+  // Si no hay stats o no hay valor para el polígono, usar un punto medio fijo
   let t = 0.4;
   if (stats?.map?.size && Number.isFinite(v)) {
     const denom = (stats.max - stats.min);
@@ -251,6 +252,7 @@ const styleFn = (feature) => {
     fillOpacity: 0.45
   };
 };
+
 
 
 
