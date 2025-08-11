@@ -235,26 +235,6 @@ return { map, min, max };
   }
 } // ✅ ← Cierra aquí la función correctamente
 
-console.info('[Viz] drawVisualization()');
-
-// Log de claves de datos
-if (stats?.map instanceof Map) {
-  console.info('[Debug] Claves en stats.map:', Array.from(stats.map.keys()).slice(0, 10));
-} else {
-  console.info('[Debug] Claves en stats.map: (sin datos)');
-}
-
-// Log de claves en GeoJSON
-if (geojson?.features?.length) {
-  console.info('[Debug] Claves en GeoJSON:', geojson.features
-    .slice(0, 10)
-    .map(f => getFeatureName(f, nivelJerarquia))
-  );
-} else {
-  console.info('[Debug] Claves en GeoJSON: (sin features)');
-}
-
-
 // ---------------------- Render principal ----------------------
 console.info('[Viz] drawVisualization()');
 
@@ -405,6 +385,9 @@ function drawVisualization(container, message = {}) {
     legend.addTo(map);
   }
 } // <-- ¡Cierre de drawVisualization!
+
+
+
 
 // ---------------------- Wrapper dscc (suscripción de datos) ----------------------
 (function initWrapper() {
