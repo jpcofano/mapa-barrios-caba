@@ -3,19 +3,18 @@
   "version": "1.0.1",
   "description": "Mapa coroplético de barrios de CABA para Looker Studio",
   "main": "dist/Visualization.js",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "test": "vitest run",
-    "deploy:js": "npm run build && gsutil -h \"Content-Type: application/javascript\" -h \"Cache-Control: no-store\" cp dist/Visualization.js gs://mapa-barrios-degcba/Visualization.js",
-    "deploy:css": "if [ -f dist/Visualization.css ]; then gsutil -h \"Content-Type: text/css\" -h \"Cache-Control: no-store\" cp dist/Visualization.css gs://mapa-barrios-degcba/Visualization.css; else echo \"No CSS to deploy\"; fi",
-    "deploy:assets": "gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/Config.json gs://mapa-barrios-degcba/Config.json && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/manifest.json gs://mapa-barrios-degcba/manifest.json && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Logo.png gs://mapa-barrios-degcba/Logo.png && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Icon.png gs://mapa-barrios-degcba/Icon.png",
-    "deploy:geojson": "gsutil -h \"Content-Type: application/geo+json\" -h \"Cache-Control: no-store\" cp public/barrioscaba.geojson gs://mapa-barrios-degcba/barrioscaba.geojson",
-    "deploy:cors": "gsutil cors set cors.json gs://mapa-barrios-degcba",
-    "deploy": "npm run deploy:js && npm run deploy:css && npm run deploy:assets",
-    "deploy:all": "npm run deploy && npm run deploy:geojson && npm run deploy:cors",
-    "verify": "gsutil ls -L gs://mapa-barrios-degcba/Visualization.js gs://mapa-barrios-degcba/Visualization.css gs://mapa-barrios-degcba/manifest.json gs://mapa-barrios-degcba/Config.json"
-  },
+"scripts": {
+  "dev": "vite",
+  "build": "vite build",
+  "test": "vitest run",
+
+  "deploy:js": "npm run build && gsutil -h \"Content-Type: application/javascript\" -h \"Cache-Control: no-store\" cp dist/Visualization.js gs://mapa-barrios-degcba/barrios-caba-map-v2025/Visualization.js",
+  "deploy:css": "if [ -f dist/Visualization.css ]; then gsutil -h \"Content-Type: text/css\" -h \"Cache-Control: no-store\" cp dist/Visualization.css gs://mapa-barrios-degcba/barrios-caba-map-v2025/Visualization.css; else echo \"No CSS to deploy\"; fi",
+  "deploy:assets": "gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/Config.json gs://mapa-barrios-degcba/barrios-caba-map-v2025/Config.json && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/manifest.json gs://mapa-barrios-degcba/barrios-caba-map-v2025/manifest.json && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Logo.png gs://mapa-barrios-degcba/barrios-caba-map-v2025/Logo.png && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Icon.png gs://mapa-barrios-degcba/barrios-caba-map-v2025/Icon.png",
+  "deploy": "npm run deploy:js && npm run deploy:css && npm run deploy:assets"
+},
+
+
   "dependencies": {
     "leaflet": "^1.9.4"
   },
