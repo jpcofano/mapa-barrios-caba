@@ -124,9 +124,39 @@ function buildValueMap(message) {
 
   // Tablas (objectTransform): nombres en DEFAULT.fields y valores en DEFAULT.rows
   const table = message?.tables?.DEFAULT || {};
-  const fieldIds = Array.isArray(table.fields) ? table.fields : [];
-  const rows = Array.isArray(table.rows) ? table.rows
-              : (Array.isArray(table.data) ? table.data : []);
+  // Normalizar claves para asegurar match
+const dimName = fields[0].id; // El id del campo dimensión (Barrio)
+const geoKeyName = 'BARRIO';  // El nombre de la propiedad en el GeoJSON
+
+const dataMap = new Map();
+data.forEach(row => {
+  const key = normalizeKeyFuzzy(row[dimName])[0]; // Usa primera variante
+  dataMap.set(key, row);
+});
+
+geojson.features.forEach(feature => {
+  const featureKey = normalizeKeyFuzzy(feature.properties[geoKeyName])[0];
+  const row = dataMap.get(featureKey);
+  if (row) {
+    feature.properties.metric = row[fields[1].id];
+  } else {
+    feature.properties.metric = null;
+  }
+});
+
+// SOPORTE fields (tableTransform) y headers (objectTransform)
+const fieldIds = Array.isArray(table.fields) ? table.fields
+                : (Array.isArray(table.headers) ? table.headers : []);
+const rows = Array.isArray(table.rows) ? table.rows
+            : (Array.isArray(table.data) ? table.data : []);
+// PATCH Debug
+try {
+  console.log('[Viz] table keys:', Object.keys(table));
+  console.log('[Viz] fields/headers:', (fieldIds || []).map(f => f?.name || f?.id));
+  console.log('[Viz] rows.length:', Array.isArray(rows) ? rows.length : 0);
+  console.log('[Viz] fieldsByConfigId:', Object.keys(message?.fieldsByConfigId || {}));
+} catch {}
+
 
   // Detectar índices
   let idxDim = -1, idxMet = -1;
@@ -155,6 +185,24 @@ function buildValueMap(message) {
     if (idxDim < 0 && dimIdx >= 0) idxDim = dimIdx;
     if (idxMet < 0 && metIdx >= 0) idxMet = metIdx;
   }
+// PATCH Fallback: si aún no hay métrica, elegir la primera columna NUMÉRICA escaneando filas
+if (idxMet < 0 && Array.isArray(fieldIds) && Array.isArray(rows) && rows.length) {
+  const sampleN = Math.min(rows.length, 25);
+  const isNumericCol = (colIdx) => {
+    let hits = 0, seen = 0;
+    for (let r = 0; r < sampleN; r++) {
+      const cell = rows[r]?.[colIdx];
+      const n = Number(cell?.v ?? cell?.value ?? cell);
+      if (!Number.isNaN(n)) hits++;
+      seen++;
+    }
+    // al menos 60% de filas numéricas en la muestra
+    return seen > 0 && hits / seen >= 0.6;
+  };
+  for (let i = 0; i < fieldIds.length; i++) {
+    if (i !== idxDim && isNumericCol(i)) { idxMet = i; break; }
+  }
+}
 
   const map = new Map();
   const values = [];
@@ -162,6 +210,14 @@ function buildValueMap(message) {
   if (idxDim < 0 || idxMet < 0 || !rows.length) {
     return { map, min: NaN, max: NaN, count: 0 };
   }
+// PATCH Debug sample de mapeo (primeras 5 claves normalizadas)
+try {
+  const sample = [];
+  let c = 0;
+  for (const [k, v] of map.entries()) { sample.push([k, v]); if (++c >= 5) break; }
+  console.log('[Viz] sample map entries:', sample);
+  console.log('[Viz] min/max/count:', min, max, values.length);
+} catch {}
 
   for (const row of rows) {
     const d = row[idxDim];
