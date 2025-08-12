@@ -29,6 +29,9 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Build (Vite)
+        run: npm run build
+
       # Autenticación SIN JSON usando WIF (como antes)
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
