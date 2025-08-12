@@ -29,27 +29,17 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # ===== AUTH por secrets existentes (sin cambiar nombres) =====
-      # Toma el PRIMERO que exista entre estos secrets:
-      #   GCP_SA_KEY, GOOGLE_CREDENTIALS, GCP_CREDENTIALS, GCP_SA_KEY_JSON
-      - name: Resolve credentials secret
-        id: creds
-        run: |
-          if [ -z "${CRED_JSON}" ]; then
-            echo "No se encontró ningún secret con credenciales GCP." >&2
-            echo "Definí uno de: GCP_SA_KEY, GOOGLE_CREDENTIALS, GCP_CREDENTIALS, GCP_SA_KEY_JSON" >&2
-            exit 1
-          fi
-        env:
-          CRED_JSON: ${{ secrets.GCP_SA_KEY || secrets.GOOGLE_CREDENTIALS || secrets.GCP_CREDENTIALS || secrets.GCP_SA_KEY_JSON }}
-
-      - name: Auth to GCP
+      # Autenticación SIN JSON usando WIF (como antes)
+      - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY || secrets.GOOGLE_CREDENTIALS || secrets.GCP_CREDENTIALS || secrets.GCP_SA_KEY_JSON }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gsutil
 
       # ===== Preparar versión (manual o fecha) =====
       - name: Prepare versioned manifest
