@@ -1,4 +1,8 @@
-name: Deploy to GCS (manual o push, con secrets existentes)
+name: Deploy to GCS (manual o push)
+
+permissions:
+  contents: read
+  id-token: write   # requerido para OIDC/WIF
 
 on:
   push:
@@ -13,10 +17,7 @@ on:
 jobs:
   build-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +31,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Build (Vite)
-        run: npm run build
-
-      # Autenticación SIN JSON usando WIF (como antes)
+      # --- AUTH con WIF (usa tus secrets existentes) ---
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -45,7 +43,7 @@ jobs:
         with:
           install_components: gsutil
 
-      # ===== Preparar versión (manual o fecha) =====
+      # Prepara versión: si "version" viene por workflow_dispatch se usa; sino YYYYMMDD
       - name: Prepare versioned manifest
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -59,13 +57,50 @@ jobs:
       - name: Build (Vite bundle)
         run: npm run build
 
+      # Deploy POSIX-safe (sin [[ ]], con validación de bucket)
       - name: Deploy to GCS
-        run: npm run deploy:js && npm run deploy:css && npm run deploy:assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET_PATH=$(cat .bucket_path)
+
+          # Validación segura del destino
+          case "$BUCKET_PATH" in
+            gs://mapa-barrios-degcba/*) echo "Bucket destino: $BUCKET_PATH" ;;
+            *) echo "Bucket inválido: $BUCKET_PATH"; exit 1 ;;
+          esac
+
+          echo "Subiendo a: $BUCKET_PATH"
+
+          # JS
+          gsutil -h "Content-Type: application/javascript" \
+                 -h "Cache-Control: no-store" \
+                 cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+
+          # CSS (si existe)
+          if [ -f dist/Visualization.css ]; then
+            gsutil -h "Content-Type: text/css" \
+                   -h "Cache-Control: no-store" \
+                   cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+          fi
+
+          # Config & manifest
+          gsutil -h "Content-Type: application/json" -h "Cache-Control: no-store" cp public/Config.json   "$BUCKET_PATH/Config.json"
+          gsutil -h "Content-Type: application/json" -h "Cache-Control: no-store" cp public/manifest.json "$BUCKET_PATH/manifest.json"
+
+          # Assets opcionales
+          if [ -f public/Logo.png ]; then
+            gsutil -h "Content-Type: image/png" -h "Cache-Control: no-store" cp public/Logo.png "$BUCKET_PATH/Logo.png"
+          fi
+          if [ -f public/Icon.png ]; then
+            gsutil -h "Content-Type: image/png" -h "Cache-Control: no-store" cp public/Icon.png "$BUCKET_PATH/Icon.png"
+          fi
 
       - name: Verify uploaded artifacts
+        shell: bash
         run: |
           BUCKET_PATH=$(cat .bucket_path)
-          echo "Archivos subidos a: $BUCKET_PATH"
+          echo "Verificando en: $BUCKET_PATH"
           gsutil ls -l "$BUCKET_PATH/Visualization.js" || true
           gsutil ls -l "$BUCKET_PATH/Visualization.css" || true
           gsutil ls -l "$BUCKET_PATH/manifest.json" || true
