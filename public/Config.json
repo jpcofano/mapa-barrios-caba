@@ -13,7 +13,7 @@
         ],
         "required": true,
         "max": 1,
-        "description": "Arrastra la dimensión de texto que coincide con el ID de las áreas del mapa (ej. 'nombre_barrio')."
+        "description": "Arrastra la dimensión de texto que coincide con el ID de las áreas del mapa."
       },
       "metricPrimary": {
         "name": "Métrica Principal",
@@ -26,77 +26,74 @@
       }
     }
   },
-  "style": {
-    "geojsonSettings": {
+  "style": [
+    {
+      "id": "geojsonSettings",
       "name": "Configuración de GeoJSON",
       "elements": [
         {
-          "type": "TEXTINPUT",
-          "id": "geojsonUrl",
-          "name": "URL del GeoJSON",
-          "value": "",
-          "placeholder": "https://tuservidor.com/mi_mapa.geojson",
-          "description": "Pega la URL pública de tu archivo GeoJSON (opcional)."
-        },
-        {
-          "type": "TEXTINPUT",
           "id": "geojsonProperty",
           "name": "Propiedad del GeoJSON a Coincidir",
+          "type": "TEXTINPUT",
           "value": "",
-          "placeholder": "Por ejemplo: 'name', 'id'",
+          "placeholder": "Ejemplo: 'name', 'id'",
           "description": "Nombre de la propiedad en el GeoJSON para hacer coincidir con la dimensión de texto."
         }
       ]
     },
-    "mapStyle": {
+    {
+      "id": "mapStyle",
       "name": "Estilo del Mapa",
       "elements": [
         {
-          "type": "COLOR_PALETTE",
           "id": "colorPalette",
           "name": "Paleta de Colores",
+          "type": "COLOR_PALETTE",
           "value": {
             "mode": "sequential",
-            "colors": ["#f2f0f7", "#3f007d"]
+            "colors": [
+              "#f2f0f7",
+              "#3f007d"
+            ]
           },
           "description": "Define un degradado de colores para la métrica principal."
         },
         {
-          "type": "SLIDER",
           "id": "minMaxOpacity",
           "name": "Opacidad del Relleno",
+          "type": "SLIDER",
           "value": 0.8,
           "min": 0,
           "max": 1,
           "step": 0.05
         },
         {
-          "type": "CHECKBOX",
           "id": "showBorders",
           "name": "Mostrar Bordes",
+          "type": "CHECKBOX",
           "value": true
         },
         {
-          "type": "COLOR",
           "id": "borderColor",
           "name": "Color del Borde",
+          "type": "COLOR",
           "value": {
             "color": "#000000"
           }
         },
         {
-          "type": "SLIDER",
           "id": "borderWidth",
           "name": "Grosor del Borde",
+          "type": "SLIDER",
           "value": 1,
           "min": 0,
           "max": 6,
           "step": 1
         },
         {
-          "type": "SLIDER",
           "id": "borderOpacity",
           "name": "Opacidad del Borde",
+          "type": "SLIDER",
           "value": 1,
           "min": 0,
           "max": 1,
@@ -104,19 +101,20 @@
         }
       ]
     },
-    "legendStyle": {
+    {
+      "id": "legendStyle",
       "name": "Estilo de la Leyenda",
       "elements": [
         {
-          "type": "CHECKBOX",
           "id": "showLegend",
           "name": "Mostrar Leyenda",
+          "type": "CHECKBOX",
           "value": true
         },
         {
-          "type": "SELECT_SINGLE",
           "id": "legendPosition",
           "name": "Posición de la Leyenda",
+          "type": "SELECT_SINGLE",
           "value": "bottomright",
           "options": [
             { "label": "Arriba Izquierda", "value": "topleft" },
@@ -127,25 +125,26 @@
         }
       ]
     },
-    "miscSettings": {
+    {
+      "id": "miscSettings",
       "name": "Configuraciones Adicionales",
       "elements": [
         {
-          "type": "COLOR",
           "id": "colorMissing",
           "name": "Color sin Dato",
+          "type": "COLOR",
           "value": {
             "color": "#cccccc"
           }
         },
         {
-          "type": "TEXTINPUT",
           "id": "popupFormat",
           "name": "Formato del Popup",
+          "type": "TEXTINPUT",
           "value": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}",
-          "description": "Formato de texto para el popup al hacer clic o pasar el mouse."
+          "description": "Formato de texto para el popup."
         }
       ]
     }
-  }
+  ]
 }
