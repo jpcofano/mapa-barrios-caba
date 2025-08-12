@@ -10,31 +10,61 @@
     }
   ],
   "style": [
-    { "id": "geojsonUrl",      "label": "URL del GeoJSON (opcional)", "type": "TEXTINPUT", "defaultValue": "" },
-    { "id": "geojsonProperty", "label": "Propiedad del GeoJSON a coincidir", "type": "TEXTINPUT", "defaultValue": "" },
+    { "id": "geojsonUrl",      "label": "URL del GeoJSON (opcional)",           "type": "TEXTINPUT",   "defaultValue": "" },
+    { "id": "geojsonProperty", "label": "Propiedad del GeoJSON a coincidir",    "type": "TEXTINPUT",   "defaultValue": "" },
 
     { "id": "colorPalette", "label": "Paleta de colores", "type": "COLOR_PALETTE",
-      "defaultValue": { "mode": "sequential", "colors": ["#f2f0f7","#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f","#3f007d"] } },
+      "defaultValue": { "mode": "sequential",
+        "colors": ["#f2f0f7","#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f","#3f007d"]
+      }
+    },
 
     { "id": "minMaxOpacity", "label": "Opacidad de relleno", "type": "NUMBER", "min": 0, "max": 1, "step": 0.05, "defaultValue": 0.8 },
     { "id": "showBorders",   "label": "Mostrar bordes",      "type": "CHECKBOX", "defaultValue": true },
-    { "id": "borderColor",   "label": "Color del borde",     "type": "COLOR",  "defaultValue": { "color": "#000000" } },
-    { "id": "borderWidth",   "label": "Grosor del borde",    "type": "NUMBER", "min": 0, "max": 6,  "step": 1,    "defaultValue": 1 },
-    { "id": "borderOpacity", "label": "Opacidad del borde",  "type": "NUMBER", "min": 0, "max": 1,  "step": 0.05, "defaultValue": 1 },
+    { "id": "borderColor",   "label": "Color del borde",     "type": "COLOR",    "defaultValue": { "color": "#000000" } },
+    { "id": "borderWidth",   "label": "Grosor del borde",    "type": "NUMBER",   "min": 0, "max": 6, "step": 1,    "defaultValue": 1 },
+    { "id": "borderOpacity", "label": "Opacidad del borde",  "type": "NUMBER",   "min": 0, "max": 1, "step": 0.05, "defaultValue": 1 },
 
     { "id": "showLabels",  "label": "Mostrar etiquetas", "type": "CHECKBOX", "defaultValue": true  },
     { "id": "showLegend",  "label": "Mostrar leyenda",   "type": "CHECKBOX", "defaultValue": true  },
-    { "id": "legendPosition","label": "Posición de la leyenda","type":"SELECT_SINGLE",
-      "options":[
-        {"label":"Arriba izq.","value":"topleft"},
-        {"label":"Arriba der.","value":"topright"},
-        {"label":"Abajo izq.","value":"bottomleft"},
-        {"label":"Abajo der.","value":"bottomright"}],
-      "defaultValue":"bottomright"
+    {
+      "id": "legendPosition",
+      "label": "Posición de la leyenda",
+      "type": "SELECT_SINGLE",
+      "options": [
+        { "label": "Arriba izq.",  "value": "topleft" },
+        { "label": "Arriba der.",  "value": "topright" },
+        { "label": "Abajo izq.",   "value": "bottomleft" },
+        { "label": "Abajo der.",   "value": "bottomright" }
+      ],
+      "defaultValue": "bottomright"
     },
 
-    { "id": "colorMissing",  "label": "Color sin dato", "type": "COLOR", "defaultValue": { "color": "#cccccc" } },
-    { "id": "popupFormat",   "label": "Formato del popup", "type": "TEXTINPUT",
-      "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" }
+    { "id": "colorMissing", "label": "Color sin dato",   "type": "COLOR",    "defaultValue": { "color": "#cccccc" } },
+    { "id": "popupFormat",  "label": "Formato del popup","type": "TEXTINPUT","defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" },
+
+    {
+      "id": "nivelJerarquia",
+      "label": "Nivel",
+      "type": "SELECT_SINGLE",
+      "options": [
+        { "label": "Barrio", "value": "barrio" },
+        { "label": "Comuna", "value": "comuna" }
+      ],
+      "defaultValue": "barrio"
+    },
+    {
+      "id": "colorScale",
+      "label": "Escala (si no hay paleta)",
+      "type": "SELECT_SINGLE",
+      "options": [
+        { "label": "Verde → Rojo",    "value": "greenToRed" },
+        { "label": "Azul → Amarillo", "value": "blueToYellow" },
+        { "label": "Grises",          "value": "grayscale" },
+        { "label": "Amarillos",       "value": "yellow" }
+      ],
+      "defaultValue": "greenToRed"
+    },
+    { "id": "invertScale", "label": "Invertir escala", "type": "CHECKBOX", "defaultValue": false }
   ]
 }
