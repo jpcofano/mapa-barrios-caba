@@ -1,4 +1,4 @@
-name: Deploy to GCS (manual o push)
+name: Deploy to GCS (manual o push, con secrets)
 
 on:
   push:
@@ -29,6 +29,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # === AUTH por secrets (clave JSON de Service Account) ===
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
         with:
