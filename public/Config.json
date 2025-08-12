@@ -36,7 +36,10 @@
           "type": "COLOR_PALETTE",
           "id": "colorPalette",
           "name": "Paleta de Colores",
-          "value": { "mode": "sequential", "colors": ["#f2f0f7","#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f","#3f007d"] }
+          "value": {
+            "mode": "sequential",
+            "colors": ["#f2f0f7","#dadaeb","#bcbddc","#9e9ac8","#807dba","#6a51a3","#54278f","#3f007d"]
+          }
         },
         {
           "type": "SELECT_SINGLE",

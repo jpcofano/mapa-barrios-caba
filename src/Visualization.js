@@ -169,46 +169,67 @@
 
   // ====== Construcción del mapa de valores (data -> Map normalizado) ======
   function buildValueMap(message) {
-    // Intenta encontrar los campos por configId o por nombres
-    const fields = message?.fieldsByConfigId || {};
-    const main = fields?.mainData?.elements || [];
+    // Fuentes posibles:
+    //  - Esquema moderno: message.fieldsByConfigId.geoDimension / metricPrimary
+    //  - Esquema legacy: message.fieldsByConfigId.mainData.elements
+    //  - Tablas: message.tables.DEFAULT.{fields,rows}
+    const fbc = message?.fieldsByConfigId || {};
+    const modernDim = Array.isArray(fbc?.geoDimension) ? fbc.geoDimension[0] : null;
+    const modernMet = Array.isArray(fbc?.metricPrimary) ? fbc.metricPrimary[0] : null;
 
-    // Fallback: buscar en tableTransform
-    const dataRows = message?.tables?.DEFAULT?.rows || message?.tables?.DEFAULT?.data || [];
-    const fieldIds = message?.tables?.DEFAULT?.fields || [];
+    const legacyMain = fbc?.mainData?.elements || [];
 
-    // Detectar índices
+    const table = message?.tables?.DEFAULT || {};
+    const fieldIds = Array.isArray(table.fields) ? table.fields : [];
+    const dataRows = Array.isArray(table.rows) ? table.rows
+                    : (Array.isArray(table.data) ? table.data : []);
+
+    // Detectar índices de dimensión / métrica
     let idxDim = -1, idxMet = -1;
 
-    // 1) Intento por configId
-    if (main.length) {
-      idxDim = 0; idxMet = 1; // asumimos [barrio, valor] según nuestro Config.json plano
+    // A) Intento por esquema moderno usando nombre o id
+    if (modernDim || modernMet) {
+      const wantedDim = (modernDim?.name || modernDim?.id || '').toString().toLowerCase();
+      const wantedMet = (modernMet?.name || modernMet?.id || '').toString().toLowerCase();
+      fieldIds.forEach((f, i) => {
+        const nm = (f?.name || f?.id || '').toString().toLowerCase();
+        if (idxDim < 0 && wantedDim && nm === wantedDim) idxDim = i;
+        if (idxMet < 0 && wantedMet && nm === wantedMet) idxMet = i;
+      });
     }
 
-    // 2) Si no, intento por nombre de campo en schema
+    // B) Intento legacy: asumimos [dim, met]
+    if ((idxDim < 0 || idxMet < 0) && legacyMain.length >= 2) {
+      idxDim = (idxDim < 0) ? 0 : idxDim;
+      idxMet = (idxMet < 0) ? 1 : idxMet;
+    }
+
+    // C) Heurística por nombre
     if ((idxDim < 0 || idxMet < 0) && Array.isArray(fieldIds)) {
-      const dimIdx = fieldIds.findIndex(f => /barrio|comuna|nombre|texto/i.test(f?.name || ''));
-      const metIdx = fieldIds.findIndex(f => /valor|métrica|metric|value|cantidad|total/i.test(f?.name || ''));
-      if (dimIdx >= 0) idxDim = dimIdx;
-      if (metIdx >= 0) idxMet = metIdx;
+      const dimIdx = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(f?.name || f?.id || ''));
+      const metIdx = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(f?.name || f?.id || ''));
+      if (idxDim < 0 && dimIdx >= 0) idxDim = dimIdx;
+      if (idxMet < 0 && metIdx >= 0) idxMet = metIdx;
     }
 
     const map = new Map();
     const values = [];
 
-    if (idxDim < 0 || idxMet < 0 || !Array.isArray(dataRows) || !dataRows.length) {
+    if (idxDim < 0 || idxMet < 0 || !Array.isArray(dataRows) || dataRows.length === 0) {
       return { map, min: NaN, max: NaN, count: 0 };
     }
 
     for (const row of dataRows) {
       const d = row[idxDim];
       const m = row[idxMet];
+
       const key = (d?.v ?? d?.value ?? d ?? '').toString();
       const valRaw = (m?.v ?? m?.value ?? m);
       const val = Number(valRaw);
+
       if (key && Number.isFinite(val)) {
+        // Generamos variantes normalizadas para mejorar el match con GeoJSON
         const keys = normalizeKeyFuzzy(key);
-        // guardamos por cada variante para mayor chance de hit
         for (const k of keys) map.set(k, val);
         values.push(val);
       }
@@ -218,6 +239,7 @@
     const max = values.length ? Math.max(...values) : NaN;
     return { map, min, max, count: values.length };
   }
+
 
   // ====== Factories para estilo y popups (sin depender de variables globales) ======
   const makeStyleFn = (style, stats, nivel) => (feature) => {
