@@ -1,6 +1,6 @@
 {
   "name": "visualizacion-barrios",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Mapa coroplético de barrios de CABA para Looker Studio",
   "main": "dist/Visualization.js",
 "scripts": {
@@ -8,12 +8,14 @@
   "build": "vite build",
   "test": "vitest run",
 
-  "deploy:js": "npm run build && gsutil -h \"Content-Type: application/javascript\" -h \"Cache-Control: no-store\" cp dist/Visualization.js gs://mapa-barrios-degcba/barrios-caba-map-v2025/Visualization.js",
-  "deploy:css": "if [ -f dist/Visualization.css ]; then gsutil -h \"Content-Type: text/css\" -h \"Cache-Control: no-store\" cp dist/Visualization.css gs://mapa-barrios-degcba/barrios-caba-map-v2025/Visualization.css; else echo \"No CSS to deploy\"; fi",
-  "deploy:assets": "gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/Config.json gs://mapa-barrios-degcba/barrios-caba-map-v2025/Config.json && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/manifest.json gs://mapa-barrios-degcba/barrios-caba-map-v2025/manifest.json && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Logo.png gs://mapa-barrios-degcba/barrios-caba-map-v2025/Logo.png && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Icon.png gs://mapa-barrios-degcba/barrios-caba-map-v2025/Icon.png",
-  "deploy": "npm run deploy:js && npm run deploy:css && npm run deploy:assets"
-},
+  "prepare:version": "node scripts/prepare-version.mjs",
 
+  "deploy:js": "npm run build && BUCKET_PATH=$(cat .bucket_path) && [[ \"$BUCKET_PATH\" == gs://mapa-barrios-degcba/* ]] && gsutil -h \"Content-Type: application/javascript\" -h \"Cache-Control: no-store\" cp dist/Visualization.js \"$BUCKET_PATH/Visualization.js\"",
+  "deploy:css": "BUCKET_PATH=$(cat .bucket_path) && [[ \"$BUCKET_PATH\" == gs://mapa-barrios-degcba/* ]] && if [ -f dist/Visualization.css ]; then gsutil -h \"Content-Type: text/css\" -h \"Cache-Control: no-store\" cp dist/Visualization.css \"$BUCKET_PATH/Visualization.css\"; else echo \"No CSS to deploy\"; fi",
+  "deploy:assets": "BUCKET_PATH=$(cat .bucket_path) && [[ \"$BUCKET_PATH\" == gs://mapa-barrios-degcba/* ]] && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/Config.json \"$BUCKET_PATH/Config.json\" && gsutil -h \"Content-Type: application/json\" -h \"Cache-Control: no-store\" cp public/manifest.json \"$BUCKET_PATH/manifest.json\" && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Logo.png \"$BUCKET_PATH/Logo.png\" && gsutil -h \"Content-Type: image/png\" -h \"Cache-Control: no-store\" cp public/Icon.png \"$BUCKET_PATH/Icon.png\"",
+
+  "deploy": "npm run prepare:version && npm run deploy:js && npm run deploy:css && npm run deploy:assets"
+},
 
   "dependencies": {
     "leaflet": "^1.9.4"

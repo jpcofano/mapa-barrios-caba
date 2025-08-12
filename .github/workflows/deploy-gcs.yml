@@ -1,20 +1,20 @@
-name: Build & Deploy to GCS (Vite + WIF)
+name: Deploy to GCS (manual o push)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   workflow_dispatch:
-
-env:
-  SYNC_DIR: dist
-
-permissions:
-  contents: read
-  id-token: write
+    inputs:
+      version:
+        description: 'Carpeta de deploy (ej: hotfix-cache). Si se deja vacío, usa YYYYMMDD.'
+        required: false
+        default: ''
 
 jobs:
-  build-and-deploy:
+  build-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -23,42 +23,44 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install deps
         run: npm ci
 
-      - name: Build (Vite)
-        run: npm run build
-
-      # Autenticación SIN JSON usando WIF (como antes)
-      - name: Auth to Google Cloud (WIF)
+      - name: Auth to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          install_components: gsutil
 
-      # Sincroniza SOLO dist/ → bucket. Borra lo que ya no existe (-d)
-      # y establece no-cache para evitar caching mientras probás.
-      # Sincroniza SOLO dist/ → bucket y borra lo que no existe
-      - name: Sync dist → GCS bucket
-        env:
-          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+      # Prepara manifest + carpeta versionada:
+      # - si se dispara manual con input.version => usa ese valor
+      # - si no, usa fecha YYYYMMDD
+      - name: Prepare versioned manifest
         run: |
-          if [ ! -d "${SYNC_DIR}" ]; then
-            echo "No existe ${SYNC_DIR}. ¿Falló el build?" && exit 1
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "Usando version manual: ${{ github.event.inputs.version }}"
+            node scripts/prepare-version.mjs --version=${{ github.event.inputs.version }}
+          else
+            echo "Sin version manual; usando fecha (YYYYMMDD)"
+            node scripts/prepare-version.mjs
           fi
-          gsutil -m rsync -r -d "${SYNC_DIR}" "gs://${GCS_BUCKET}"
 
-      # (Dev) Forzar no-cache para ver cambios al instante
-      - name: Set no-cache headers
-        env:
-          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+      - name: Build (Vite bundle)
+        run: npm run build
+
+      - name: Deploy to GCS
+        run: npm run deploy:js && npm run deploy:css && npm run deploy:assets
+
+      - name: Verify uploaded artifacts
         run: |
-          gsutil -m setmeta -r -h "Cache-Control: no-store, max-age=0" "gs://${GCS_BUCKET}"
-
+          BUCKET_PATH=$(cat .bucket_path)
+          echo "Archivos subidos a: $BUCKET_PATH"
+          gsutil ls -l "$BUCKET_PATH/Visualization.js" || true
+          gsutil ls -l "$BUCKET_PATH/Visualization.css" || true
+          gsutil ls -l "$BUCKET_PATH/manifest.json" || true
+          gsutil ls -l "$BUCKET_PATH/Config.json" || true
