@@ -1,44 +1,38 @@
 {
-  "data": [
-    {
-      "id": "datos",
-      "label": "Datos",
-      "elements": [
-        {
-          "id": "geoDimension",
-          "label": "Dimensión de Texto (GeoJSON ID)",
-          "type": "DIMENSION",
-          "options": { "min": 1, "max": 1, "supportedTypes": ["DEFAULT"] }
-        },
-        {
-          "id": "metricPrimary",
-          "label": "Métrica Principal",
-          "type": "METRIC",
-          "options": { "min": 1, "max": 1 }
-        }
-      ]
+  "data": {
+    "supportedTransforms": [
+      {
+        "type": "geo_transform"
+      }
+    ],
+    "fields": {
+      "geoDimension": {
+        "name": "Dimensión de Texto (GeoJSON ID)",
+        "types": ["TEXT"],
+        "required": true,
+        "max": 1,
+        "description": "Arrastra la dimensión de texto que coincide con el ID de las áreas del mapa."
+      },
+      "metricPrimary": {
+        "name": "Métrica Principal",
+        "types": ["NUMBER"],
+        "required": true,
+        "max": 1,
+        "description": "Métrica usada para colorear las áreas del mapa."
+      }
     }
-  ],
+  },
   "style": [
     {
       "id": "geojsonSettings",
       "label": "Configuración de GeoJSON",
       "elements": [
         {
-          "id": "nivelJerarquia",
-          "label": "Nivel (barrio/comuna)",
-          "type": "SELECT_SINGLE",
-          "defaultValue": "barrio",
-          "options": [
-            { "label": "Barrio", "value": "barrio" },
-            { "label": "Comuna", "value": "comuna" }
-          ]
-        },
-        {
           "id": "geojsonProperty",
           "label": "Propiedad del GeoJSON a Coincidir",
           "type": "TEXTINPUT",
-          "defaultValue": ""
+          "defaultValue": "",
+          "placeholder": "Ejemplo: 'name', 'id'"
         }
       ]
     },
@@ -47,34 +41,23 @@
       "label": "Colorización",
       "elements": [
         {
-          "id": "colorScale",
-          "label": "Escala",
-          "type": "SELECT_SINGLE",
-          "defaultValue": "greenToRed",
-          "options": [
-            { "label": "Green → Red", "value": "greenToRed" },
-            { "label": "Blue → Yellow", "value": "blueToYellow" },
-            { "label": "Grayscale", "value": "grayscale" },
-            { "label": "Yellow", "value": "yellow" }
-          ]
-        },
-        {
-          "id": "invertScale",
-          "label": "Invertir escala",
-          "type": "CHECKBOX",
-          "defaultValue": false
-        },
-        {
-          "id": "customPalette",
-          "label": "Paleta personalizada (hex separados por coma)",
-          "type": "TEXTINPUT",
-          "defaultValue": ""
+          "id": "colorPalette",
+          "label": "Paleta de colores",
+          "type": "COLOR_PALETTE",
+          "defaultValue": {
+            "mode": "sequential",
+            "colors": ["#f2f0f7", "#3f007d"]
+          },
+          "description": "Define un degradado de colores para la métrica principal."
         },
         {
           "id": "opacity",
           "label": "Opacidad del relleno",
-          "type": "OPACITY",
-          "defaultValue": 0.5
+          "type": "SLIDER",
+          "defaultValue": 0.8,
+          "min": 0,
+          "max": 1,
+          "step": 0.05
         }
       ]
     },
@@ -91,20 +74,28 @@
         {
           "id": "borderColor",
           "label": "Color del borde",
-          "type": "BORDER_COLOR",
-          "defaultValue": "#000000"
+          "type": "COLOR",
+          "defaultValue": {
+            "color": "#000000"
+          }
         },
         {
           "id": "borderWidth",
           "label": "Grosor del borde",
-          "type": "LINE_WEIGHT",
-          "defaultValue": 1
+          "type": "SLIDER",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 6,
+          "step": 1
         },
         {
           "id": "borderOpacity",
           "label": "Opacidad del borde",
-          "type": "OPACITY",
-          "defaultValue": 1
+          "type": "SLIDER",
+          "defaultValue": 1,
+          "min": 0,
+          "max": 1,
+          "step": 0.05
         }
       ]
     },
@@ -145,8 +136,10 @@
         {
           "id": "colorMissing",
           "label": "Color sin dato",
-          "type": "FILL_COLOR",
-          "defaultValue": "#cccccc"
+          "type": "COLOR",
+          "defaultValue": {
+            "color": "#cccccc"
+          }
         },
         {
           "id": "popupFormat",
