@@ -23,9 +23,22 @@ const y = today.getFullYear();
 const m = String(today.getMonth() + 1).padStart(2, '0');
 const d = String(today.getDate()).padStart(2, '0');
 
-const VERSION = getArg('version', `${y}${m}${d}`); // YYYYMMDD
+/* const VERSION = getArg('version', `${y}${m}${d}`); // YYYYMMDD
 const PREFIX  = getArg('prefix', 'barrios-caba-map-v2025');
 const FOLDER  = `${PREFIX}-${VERSION}`;
+ */
+// Sanitizar VERSION y rutas (quita NBSP y espacios raros)
+const clean = (s='') => s
+  .toString()
+  .replace(/\u00A0/g,' ')     // NBSP → espacio normal
+  .replace(/[^\w\-]/g,'-')    // cualquier raro → guion
+  .replace(/\-+/g,'-')
+  .trim();
+
+const RAW_VERSION = process.env.VERSION || (process.argv.find(a=>a.startsWith('--version='))||'').split('=')[1] || '';
+const VERSION = clean(RAW_VERSION) || (new Date()).toISOString().slice(0,10).replace(/-/g,''); // YYYYMMDD
+const PREFIX = 'barrios-caba-map-v2025';
+const FOLDER = `${PREFIX}-${VERSION}`; // ej: barrios-caba-map-v2025-d
 
 const BUCKET = 'gs://mapa-barrios-degcba';
 const HTTP_BASE = 'https://storage.googleapis.com/mapa-barrios-degcba';
