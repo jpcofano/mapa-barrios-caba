@@ -1,22 +1,25 @@
-name: Deploy to GCS (gcloud storage)
+name: Deploy to GCS (Vite + prepare-version)
 
-permissions:
-  contents: read
-  id-token: write
-  
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Carpeta de deploy (ej: hotfix-cache). Si se deja vacío, usa YYYYMMDD.'
+        description: 'Subcarpeta de deploy (ej: hotfix-cache). Vacío => YYYYMMDD'
+        required: false
+        default: ''
+      prefix:
+        description: 'Prefijo de carpeta (default: barrios-caba-map-v2025)'
         required: false
         default: ''
 
+permissions:
+  contents: read
+  id-token: write
+
 env:
-  GCS_BUCKET: ${{ secrets.GCS_BUCKET }}       # ej: gs://mi-bucket
-  GCS_BASE_PATH: ${{ secrets.GCS_BASE_PATH }} # ej: viz (opcional)
+  SYNC_DIR: dist
 
 jobs:
   deploy:
@@ -26,173 +29,75 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Google Auth (WIF)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (Vite)
+        run: npm run build
+
+      # === Ejecuta tu script para definir carpeta destino y reescribir manifest ===
+      - name: Prepare version (rewrite manifest + .bucket_path)
+        run: |
+          node scripts/prepare-version.mjs \
+            --version="${{ github.event.inputs.version }}" \
+            --prefix="${{ github.event.inputs.prefix }}"
+        # El script:
+        # - reescribe public/manifest.json apuntando a <FOLDER>
+        # - emite .bucket_path con gs://.../<FOLDER>
+        # - emite .manifest_gs_url y .manifest_http_url
+
+      # === Copiar manifest y config dentro de dist/ para que rsync los suba ===
+      - name: Copy manifest/config into dist
+        run: |
+          cp -f public/manifest.json dist/ || true
+          # Si tu Config.json vive en public/, copialo también:
+          if [ -f public/Config.json ]; then cp -f public/Config.json dist/; fi
+
+      # --- AUTH con WIF ---
+      - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          token_format: access_token
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      - name: Setup gcloud
+      - name: Setup gcloud (with gsutil)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          install_components: gsutil
 
-      - name: Node setup (si builda front)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install deps
+      - name: Sanity check build dir
         run: |
-          if [ -f package.json ]; then
-            npm ci
-          fi
+          [ -d "${SYNC_DIR}" ] || (echo "No existe ${SYNC_DIR}" && exit 1)
+          ls -la "${SYNC_DIR}"
 
-      - name: Build
-        run: |
-          if [ -f package.json ]; then
-            npm run build || npm run build:prod || true
-          fi
-          mkdir -p dist public
-
-      - name: Compute deploy folder
-        id: version
-        shell: bash
-        run: |
-          INPUT="${{ github.event.inputs.version }}"
-          if [ -z "$INPUT" ]; then
-            INPUT="$(date +%Y%m%d)"
-          fi
-          echo "value=$INPUT" >> "$GITHUB_OUTPUT"
-          echo "Deploy folder: $INPUT"
-
-      - name: Compose bucket path
-        id: bucketpath
-        shell: bash
-        run: |
-          if [ -z "${GCS_BUCKET}" ]; then
-            echo "Falta secret GCS_BUCKET (ej: gs://mi-bucket)"; exit 1
-          fi
-          BASE="${GCS_BASE_PATH:-}"
-          if [ -n "$BASE" ]; then
-            BUCKET_PATH="${GCS_BUCKET%/}/$BASE/${{ steps.version.outputs.value }}"
-          else
-            BUCKET_PATH="${GCS_BUCKET%/}/${{ steps.version.outputs.value }}"
-          fi
-          echo "$BUCKET_PATH" > .bucket_path
-          echo "path=$BUCKET_PATH" >> "$GITHUB_OUTPUT"
-          echo "BUCKET_PATH=$BUCKET_PATH"
-
-      - name: Sanitizar artefactos (remover NBSP y normalizar)
-        shell: bash
-        run: |
-          node - <<'NODE'
-          const fs=require('fs'), path=require('path');
-          function walk(d){if(!fs.existsSync(d)) return []; return fs.readdirSync(d,{withFileTypes:true})
-            .flatMap(e=>e.isDirectory()?walk(path.join(d,e.name)):[path.join(d,e.name)]);}
-          const roots=['dist','public'];
-          const files=roots.flatMap(walk).filter(p=>/\.(js|css|json|html|md|txt|csv|ts|tsx|map)$/.test(p));
-          for(const f of files){
-            const s=fs.readFileSync(f,'utf8');
-            const t=s.normalize('NFKC').replace(/\u00A0/g,' ');
-            if(s!==t){ fs.writeFileSync(f,t,'utf8'); console.log('Sanitized', f); }
-          }
-          NODE
-
-      - name: Guardia: bloquear NBSP en dist/public
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -PRn --binary-files=without-match $'\xC2\xA0' dist public; then
-            echo "ERROR: Encontrado NBSP (U+00A0) en artefactos."
-            exit 1
-          fi
-
-      - name: Upload to GCS (gcloud storage cp + charset UTF-8)
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUCKET_PATH=$(cat .bucket_path)
-          echo "Subiendo a: $BUCKET_PATH"
-
-          # HTML
-          if [ -f dist/index.html ]; then
-            gcloud storage cp \
-              --content-type="text/html; charset=UTF-8" \
-              --cache-control="no-store" \
-              dist/index.html "$BUCKET_PATH/index.html"
-          fi
-
-          # JS principal
-          if [ -f dist/Visualization.js ]; then
-            gcloud storage cp \
-              --content-type="application/javascript; charset=UTF-8" \
-              --cache-control="no-store" \
-              dist/Visualization.js "$BUCKET_PATH/Visualization.js"
-          fi
-
-          # JS sourcemap
-          if [ -f dist/Visualization.js.map ]; then
-            gcloud storage cp \
-              --content-type="application/json; charset=UTF-8" \
-              --cache-control="no-store" \
-              dist/Visualization.js.map "$BUCKET_PATH/Visualization.js.map"
-          fi
-
-          # CSS
-          if [ -f dist/Visualization.css ]; then
-            gcloud storage cp \
-              --content-type="text/css; charset=UTF-8" \
-              --cache-control="no-store" \
-              dist/Visualization.css "$BUCKET_PATH/Visualization.css"
-          fi
-
-          # Config y manifest
-          if [ -f public/Config.json ]; then
-            gcloud storage cp \
-              --content-type="application/json; charset=UTF-8" \
-              --cache-control="no-store" \
-              public/Config.json "$BUCKET_PATH/Config.json"
-          fi
-
-          if [ -f public/manifest.json ]; then
-            gcloud storage cp \
-              --content-type="application/manifest+json; charset=UTF-8" \
-              --cache-control="no-store" \
-              public/manifest.json "$BUCKET_PATH/manifest.json"
-          fi
-
-          # Assets estáticos (sin charset)
-          if [ -f public/Logo.png ]; then
-            gcloud storage cp \
-              --content-type="image/png" \
-              --cache-control="no-store" \
-              public/Logo.png "$BUCKET_PATH/Logo.png"
-          fi
-          if [ -f public/Icon.png ]; then
-            gcloud storage cp \
-              --content-type="image/png" \
-              --cache-control="no-store" \
-              public/Icon.png "$BUCKET_PATH/Icon.png"
-          fi
-          if [ -f public/Logo.svg ]; then
-            gcloud storage cp \
-              --content-type="image/svg+xml" \
-              --cache-control="no-store" \
-              public/Logo.svg "$BUCKET_PATH/Logo.svg"
-          fi
-
-      - name: Verify uploaded artifacts (contentType y cacheControl)
-        shell: bash
+      - name: Upload (rsync to bucket path)
         run: |
           BUCKET_PATH=$(cat .bucket_path)
+          echo "Deploy to: ${BUCKET_PATH}"
+          gsutil -m rsync -r -d "${SYNC_DIR}" "${BUCKET_PATH}"
+
+      - name: Set MIME and cache headers
+        run: |
+          BUCKET_PATH=$(cat .bucket_path)
+          # Tipos MIME explícitos
+          gsutil -m setmeta -h "Content-Type: application/javascript" "${BUCKET_PATH}/Visualization.js" || true
+          gsutil -m setmeta -h "Content-Type: text/css" "${BUCKET_PATH}/Visualization.css" || true
+          gsutil -m setmeta -h "Content-Type: application/json" "${BUCKET_PATH}/manifest.json" || true
+          gsutil -m setmeta -h "Content-Type: application/json" "${BUCKET_PATH}/Config.json" || true
+          # Cache (ajustá a gusto; para dev usar no-store)
+          gsutil -m setmeta -r -h "Cache-Control: public, max-age=300" "${BUCKET_PATH}"
+
+      - name: Verify uploaded artifacts
+        run: |
+          BUCKET_PATH=$(cat .bucket_path)
+          echo "Verificando en ${BUCKET_PATH}"
           for obj in Visualization.js Visualization.css manifest.json Config.json; do
-            if gcloud storage objects describe "$BUCKET_PATH/$obj" --format="value(name)"; then
-              echo "OK: $obj"
-              gcloud storage objects describe "$BUCKET_PATH/$obj" \
-                --format="table(name,contentType,cacheControl,size)"
-            fi
+            gcloud storage objects describe "${BUCKET_PATH#gs://}/$obj" \
+              --format="table(name,contentType,cacheControl,size)" || echo "Falta: $obj"
           done
-
-
