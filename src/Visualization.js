@@ -586,7 +586,7 @@ function fmt(n) {
 
 function initWrapper(attempt = 1) {
   try {
-    const _diag = (label) => {
+    const _diag = (label, extra = {}) => {
       console.log(`[Diag ${label}]`, {
         time: new Date().toISOString(),
         dsccExists: !!window.dscc,
@@ -594,7 +594,8 @@ function initWrapper(attempt = 1) {
         subscribeToDataType: typeof window.dscc?.subscribeToData,
         tableTransformType: typeof window.dscc?.tableTransform,
         objectTransformType: typeof window.dscc?.objectTransform,
-        locationHref: location.href
+        locationHref: location.href,
+        ...extra
       });
     };
 
@@ -603,43 +604,45 @@ function initWrapper(attempt = 1) {
     const dscc = (typeof window !== 'undefined') ? window.dscc : null;
 
     if (dscc && typeof dscc.subscribeToData === 'function') {
-      console.log(`[Viz] initWrapper: dscc disponible en attempt ${attempt}, suscribiendo con tableTransform`);
+      console.log(`[Viz] initWrapper: dscc disponible en attempt ${attempt}`);
+
+      // Suscripción RAW (sin transform)
+      dscc.subscribeToData((rawData) => {
+        try {
+          console.groupCollapsed('[Viz] RAW subscribeToData (sin transform)');
+          console.log('Tipo de rawData:', typeof rawData);
+          console.log('Keys rawData:', Object.keys(rawData || {}));
+          console.log('Campos dimensiones (raw):', rawData?.fields?.dimensions || []);
+          console.log('Campos métricas (raw):', rawData?.fields?.metrics || []);
+          console.log('Filas DEFAULT (raw):', Array.isArray(rawData?.tables?.DEFAULT) ? rawData.tables.DEFAULT.length : 'no array');
+          if (Array.isArray(rawData?.tables?.DEFAULT)) {
+            console.log('Primeras filas RAW:', rawData.tables.DEFAULT.slice(0, 5));
+          }
+          console.groupEnd();
+        } catch (err) {
+          console.error('[Viz] Error procesando RAW data:', err);
+        }
+      });
+
+      // Suscripción con tableTransform (la que usamos normalmente)
       dscc.subscribeToData((data) => {
         try {
-          console.log('[Viz] Datos recibidos de Looker Studio:', {
-            dimCount: Array.isArray(data?.fields?.dimensions) ? data.fields.dimensions.length : 0,
-            metCount: Array.isArray(data?.fields?.metrics) ? data.fields.metrics.length : 0,
-            tableKeys: Object.keys(data?.tables || {}),
-            rawTablesType: typeof data?.tables?.DEFAULT
-          });
-
-          // 🔍 Log detallado de campos
-          console.log('[Viz] Dimensiones:', data?.fields?.dimensions?.map(d => ({
-            id: d.id, name: d.name, type: d.type
-          })) || []);
-
-          console.log('[Viz] Métricas:', data?.fields?.metrics?.map(m => ({
-            id: m.id, name: m.name, type: m.type
-          })) || []);
-
-          // 🔍 Log de primeras filas
-          if (Array.isArray(data?.tables?.DEFAULT)) {
-            console.log(`[Viz] Primeras filas (${data.tables.DEFAULT.length} totales):`,
-              data.tables.DEFAULT.slice(0, 5)
-            );
-          } else if (data?.tables?.DEFAULT?.rows) {
-            console.log(`[Viz] Primeras filas (${data.tables.DEFAULT.rows.length} totales):`,
-              data.tables.DEFAULT.rows.slice(0, 5)
-            );
-          } else {
-            console.warn('[Viz] No hay filas en tables.DEFAULT');
+          console.groupCollapsed('[Viz] subscribeToData con tableTransform');
+          console.log('Dimensiones:', data?.fields?.dimensions || []);
+          console.log('Métricas:', data?.fields?.metrics || []);
+          const rows = data?.tables?.DEFAULT?.rows || [];
+          console.log(`Filas DEFAULT (transformadas): ${rows.length}`);
+          if (rows.length > 0) {
+            console.log('Primeras filas transformadas:', rows.slice(0, 5));
           }
+          console.groupEnd();
 
           drawVisualization(ensureContainer(), data);
         } catch (err) {
-          console.error('[Viz] Error procesando datos en subscribeToData:', err);
+          console.error('[Viz] Error procesando datos en subscribeToData (transform):', err);
         }
       }, { transform: dscc.tableTransform });
+
     } else {
       if (attempt < 5) {
         console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
@@ -660,6 +663,7 @@ function initWrapper(attempt = 1) {
     console.error('[Viz] Error initWrapper:', e);
   }
 }
+
 
 
 
