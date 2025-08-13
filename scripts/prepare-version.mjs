@@ -60,6 +60,15 @@ if (Array.isArray(manifest.components)) {
 // Guardar manifest
 fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 
+// Extra: exportar GS URL del manifest para Studio
+const manifestGsFile = path.resolve(process.cwd(), '.manifest_gs_url');
+const MANIFEST_GS = `${BUCKET}/${FOLDER}/manifest.json`;
+fs.writeFileSync(manifestGsFile, MANIFEST_GS, 'utf8');
+
+console.log(`[prepare-version] MANIFEST (GS): ${MANIFEST_GS}`);
+console.log(`[prepare-version] Copiá y pegá en Studio (Agregar desde manifiesto):`);
+console.log(`  ${MANIFEST_GS}`);
+
 // Exportar BUCKET_PATH para scripts de deploy
 const bucketFile = path.resolve(process.cwd(), '.bucket_path');
 fs.writeFileSync(bucketFile, `${BUCKET}/${FOLDER}`, 'utf8');
