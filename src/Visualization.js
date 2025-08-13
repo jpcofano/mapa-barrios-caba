@@ -3,9 +3,7 @@
   try {
     const fixOne = (val) => {
       if (!val) return val;
-      // URLSearchParams ya entrega decodificado: gs://.../a barrios → hay \u00A0
-      // Regla: si hay NBSP/espacio inmediatamente después de "/{carpeta}", lo cambiamos por "/"
-      // Soporta 1 segmento de carpeta (a, b, v2025, etc.)
+      // Corrige NBSP/espacio después de "/{carpeta}" en URLs como gs://.../c barrios
       return String(val).replace(
         /(gs:\/\/[^/]+\/[^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
         (_m, g1) => g1 + '/'
@@ -25,7 +23,7 @@
     }
 
     if (changed) {
-      const q = usp.toString(); // re-encodea correcto
+      const q = usp.toString();
       history.replaceState(null, '', (q ? '?' + q : location.pathname));
       console.log('[Viz] Query saneada: antes=' + rawQ + ', después=' + usp.toString());
     }
@@ -84,7 +82,6 @@ const lerp = (a, b, t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2, '0');
 const rgb = (r, g, b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 
-// Escalas por nombre (fallback si no hay palette)
 function colorFromScale(scaleName, t, invert) {
   t = clamp01(t);
   if (invert) t = 1 - t;
@@ -194,7 +191,6 @@ function buildValueMap(message) {
   let idxDim = -1, idxMet = -1;
   let keyFieldId, valFieldId;
 
-  // Moderno: usar IDs de fieldsByConfigId
   if (modernDim && modernMet) {
     keyFieldId = modernDim.id || modernDim.name;
     valFieldId = modernMet.id || modernMet.name;
@@ -205,13 +201,11 @@ function buildValueMap(message) {
     });
   }
 
-  // Legacy o heurística
   if (idxDim < 0 || idxMet < 0) {
     idxDim = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(f?.name || f?.id || ''));
     idxMet = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(f?.name || f?.id || ''));
   }
 
-  // Fallback numérico para métrica
   if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
     const isNumericCol = (colIdx) => {
@@ -263,7 +257,6 @@ function buildValueMap(message) {
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
-  // Reset contenedor
   container.innerHTML = '';
   container.style.width = '100%';
   container.style.height = '100%';
@@ -273,10 +266,8 @@ export default function drawVisualization(container, message = {}) {
   const stats = buildValueMap(message);
   const geojson = GEOJSON;
 
-  // Mapa (sin tiles externos; CSP-safe)
   const map = L.map(container, { zoomControl: true, attributionControl: true });
 
-  // Estilo por feature (usa palette o escala)
   const styleFn = (feature) => {
     const nombre = getFeatureNameProp(feature, nivel, style.geojsonProperty);
     let v;
@@ -334,7 +325,6 @@ export default function drawVisualization(container, message = {}) {
     console.warn('[Viz] No se pudo ajustar bounds:', e);
   }
 
-  // Leyenda
   if (style.showLegend) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
@@ -407,7 +397,6 @@ function fmt(n) {
 (function () {
   'use strict';
 
-  // --- Helper: asegura un contenedor 100% del área ---
   function ensureContainer() {
     let el = document.getElementById('container');
     if (!el) {
@@ -475,7 +464,23 @@ function fmt(n) {
                 <li>Comprobar la consola para errores de red o CSP.</li>
               </ul>
             </div>`;
-          drawVisualization(container, {});
+          // Datos mock para pruebas locales
+          const mockData = {
+            tables: {
+              DEFAULT: {
+                fields: [{ id: "barrio", name: "Barrio" }, { id: "poblacion", name: "Población" }],
+                rows: [
+                  { barrio: "Palermo", poblacion: 225000 },
+                  { barrio: "Recoleta", poblacion: 188000 }
+                ]
+              }
+            },
+            fieldsByConfigId: {
+              geoDimension: [{ id: "barrio", name: "Barrio" }],
+              metricPrimary: [{ id: "poblacion", name: "Población" }]
+            }
+          };
+          drawVisualization(container, mockData);
         }
       }
     } catch (e) {
@@ -483,7 +488,6 @@ function fmt(n) {
     }
   }
 
-  // --- Invocación segura del wrapper ---
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       try { console.log('[Viz] DOMContentLoaded → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
