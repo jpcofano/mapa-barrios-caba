@@ -584,76 +584,101 @@ function fmt(n) {
     return el;
   }
 
-function initWrapper(attempt = 1, startTime = performance.now()) {
+function initWrapper() {
   try {
+    const start = performance.now();
+
+    // 🔍 Función de diagnóstico
     const _diag = (label) => {
       console.log(`[Diag ${label}]`, {
         time: new Date().toISOString(),
-        elapsedMs: Math.round(performance.now() - startTime),
-        inIframe: window.self !== window.top,
         dsccExists: !!window.dscc,
         dsccType: typeof window.dscc,
         subscribeToDataType: typeof window.dscc?.subscribeToData,
         tableTransformType: typeof window.dscc?.tableTransform,
         objectTransformType: typeof window.dscc?.objectTransform,
-        locationHref: location.href,
-        manifestUrl: (typeof document !== "undefined" && document.currentScript)
-          ? document.currentScript.src
-          : "No detectado"
+        locationHref: location.href
       });
     };
 
-    _diag(`attempt-${attempt}`);
+    // 🔍 Detectar contexto
+    const detectLookerContext = () => {
+      const href = location.href;
+      if (/lookerstudio\.googleusercontent\.com\/thirdPartyContent/.test(href)) {
+        console.log('[Diag] Contexto de iframe de comunidad detectado ✅');
+      } else {
+        console.warn('[Diag] Esto NO parece un iframe de comunidad real ⚠');
+      }
+    };
 
-    const dscc = (typeof window !== 'undefined') ? window.dscc : null;
+    detectLookerContext();
+    _diag('start');
 
-    if (dscc && typeof dscc.subscribeToData === 'function') {
-      console.log(`[Viz] dscc disponible en attempt ${attempt}, suscribiendo con tableTransform`);
+    // 🎯 Esperar dscc en tiempo real
+    const waitForDscc = (maxWaitMs = 10000) => {
+      const check = () => {
+        if (window.dscc && typeof window.dscc.subscribeToData === 'function') {
+          console.log(`[Viz] dscc detectado tras ${Math.round(performance.now() - start)}ms ✅`);
+          initWithDscc(window.dscc);
+          return;
+        }
+        if (performance.now() - start > maxWaitMs) {
+          console.error('[Viz] dscc no apareció tras el tiempo límite ❌');
+          console.log('[Viz] Contenido de window (keys):', Object.keys(window));
+          showFallback();
+          return;
+        }
+        requestAnimationFrame(check);
+      };
+      check();
+    };
+
+    // 📦 Inicializar si dscc está disponible
+    function initWithDscc(dscc) {
+      console.log('[Viz] Iniciando suscripción con tableTransform...');
       dscc.subscribeToData((data) => {
         try {
           console.log('[Viz] Datos recibidos de Looker Studio:', {
             dimCount: Array.isArray(data?.fields?.dimensions) ? data.fields.dimensions.length : 0,
             metCount: Array.isArray(data?.fields?.metrics) ? data.fields.metrics.length : 0,
             tableKeys: Object.keys(data?.tables || {}),
-            rawTablesType: typeof data?.tables?.DEFAULT,
-            firstRowSample: Array.isArray(data?.tables?.DEFAULT) && data.tables.DEFAULT.length > 0
-              ? data.tables.DEFAULT[0]
-              : null
+            rawTablesType: typeof data?.tables?.DEFAULT
           });
           drawVisualization(ensureContainer(), data);
         } catch (err) {
           console.error('[Viz] Error procesando datos en subscribeToData:', err);
-          console.error('[Viz] Stack:', err.stack);
         }
       }, { transform: dscc.tableTransform });
-    } else {
-      if (attempt < 10) {
-        console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
-        console.trace("[Viz] Stack al no encontrar dscc:");
-        setTimeout(() => initWrapper(attempt + 1, startTime), 1000);
-      } else {
-        console.error('[Viz] dscc no disponible tras 10 intentos, entrando en fallback.');
-        console.log('[Viz] Contenido de window (keys):', Object.keys(window));
-        try {
-          console.log('[Viz] Dump parcial de window:', JSON.stringify(Object.keys(window).slice(0, 50)));
-        } catch (e) {
-          console.warn("[Viz] No se pudo serializar window keys:", e);
-        }
-        const container = ensureContainer();
-        container.innerHTML = `
-          <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
-            <strong>Sin dscc:</strong> No se detecta API de Looker Studio.<br/>
-            Tiempo total de espera: ${Math.round(performance.now() - startTime)} ms<br/>
-            Verificá que la viz esté insertada como <em>Componente de la comunidad</em> en un informe real.
-          </div>`;
-        drawVisualization(container, {});
-      }
     }
+
+    // 🚨 Fallback si no hay dscc
+    function showFallback() {
+      const container = ensureContainer();
+      container.innerHTML = `
+        <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
+          <strong>Sin dscc:</strong> No se detecta API de Looker Studio.<br/>
+          Verificá que la viz esté insertada como <em>Componente de la comunidad</em> en un informe real.
+        </div>`;
+      drawVisualization(container, {});
+    }
+
+    // 🛠 Escuchar eventos de carga del documento
+    document.addEventListener('readystatechange', () => {
+      console.log('[Diag] readystatechange:', document.readyState);
+    });
+
+    window.addEventListener('load', () => {
+      console.log('[Diag] Evento load disparado');
+    });
+
+    // 🚀 Arrancar espera de dscc
+    waitForDscc();
+
   } catch (e) {
     console.error('[Viz] Error initWrapper:', e);
-    console.error('[Viz] Stack:', e.stack);
   }
 }
+
 
 
   // --- invocación segura del wrapper ---
