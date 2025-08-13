@@ -1,6 +1,6 @@
 {
   "name": "Barrios CABA Map",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "organization": "Tu Org",
   "description": "Mapa de barrios CABA con coropletas",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
@@ -11,7 +11,7 @@
   "devMode": true,
   "components": [
     {
-      "id": "70371890barrios-caba-map-v2025a",
+      "id": "70371890barrios-caba-map-v2025aa",
       "name": "Mapa Barrios CABA",
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
