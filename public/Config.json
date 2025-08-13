@@ -1,5 +1,7 @@
-
 {
+  "transforms": [
+    { "type": "objectTransform" }
+  ],
   "data": [
     {
       "id": "datos",
@@ -158,5 +160,8 @@
         }
       ]
     }
-  ]
+  ],
+  "features": {
+    "enableComparisonDateRange": false
+  }
 }
