@@ -1,18 +1,39 @@
 (function(){
+  // --- Sanitizador de NBSP en vizId ---
+  try {
+    const raw = location.search || '';
+    const dec = decodeURIComponent(raw);
+
+    // Corrige NBSP o espacio entre "/a" y el resto del ID
+    const fixedDec = dec.replace(
+      /(vizId=gs:\/\/[^&]*\/a)[\u00A0 ]+/i,
+      (_m, g1) => g1 + '/'
+    );
+
+    if (fixedDec !== dec) {
+      const fixed = '?' + encodeURI(fixedDec.slice(1));
+      history.replaceState(null, '', fixed);
+    }
+  } catch (e) {
+    console.warn('[Viz] No se pudo sanear query:', e);
+  }
+
+  // --- Caja de diagnóstico ---
   const box=document.createElement('div');
   box.style.cssText='position:fixed;bottom:8px;left:8px;z-index:999999;background:#000c;color:#fff;padding:8px 10px;border-radius:8px;font:12px system-ui;max-width:70vw;cursor:pointer';
   box.title='clic para cerrar'; box.onclick=()=>box.remove();
-  const raw = location.search || '';
-  const dec = decodeURIComponent(raw);
-  const hasNBSP = /%C2%A0/i.test(raw) || /\u00A0/.test(dec);
+  const rawQ = location.search || '';
+  const decQ = decodeURIComponent(rawQ);
+  const hasNBSP = /%C2%A0/i.test(rawQ) || /\u00A0/.test(decQ);
   box.innerHTML = [
     '<b>Diag URL</b>',
     'hasNBSP: '+hasNBSP,
-    'search(raw): '+raw.slice(0,200),
-    'search(dec): '+dec.slice(0,200)
+    'search(raw): '+rawQ.slice(0,200),
+    'search(dec): '+decQ.slice(0,200)
   ].join('<br/>');
   document.body.appendChild(box);
 })();
+
 
 // src/Visualization.js
 // Community Viz 2025 — Leaflet (sin fetch) + Vite + dscc.objectTransform
