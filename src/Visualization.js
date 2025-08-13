@@ -1,24 +1,37 @@
 (function(){
-  // --- Sanitizador de NBSP en vizId ---
+  // --- Sanitizador de NBSP / espacios en vizId, js, css ---
   try {
-    const raw = location.search || '';
-    const dec = decodeURIComponent(raw);
+    const fixOne = (val) => {
+      if (!val) return val;
+      // URLSearchParams ya entrega decodificado: gs://.../a barrios → hay \u00A0
+      // Regla: si hay NBSP/espacio inmediatamente después de "/{carpeta}", lo cambiamos por "/"
+      // Soporta 1 segmento de carpeta (a, b, v2025, etc.)
+      return String(val).replace(
+        /(gs:\/\/[^/]+\/[^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
+        (_m, g1) => g1 + '/'
+      );
+    };
 
-    // Corrige NBSP o espacio entre "/a" y el resto del ID
-    const fixedDec = dec.replace(
-      /(vizId=gs:\/\/[^&]*\/a)[\u00A0 ]+/i,
-      (_m, g1) => g1 + '/'
-    );
+    const usp = new URLSearchParams(window.location.search);
+    const keys = ['vizId', 'js', 'css'];
+    let changed = false;
 
-    if (fixedDec !== dec) {
-      const fixed = '?' + encodeURI(fixedDec.slice(1));
-      history.replaceState(null, '', fixed);
+    for (const k of keys) {
+      if (!usp.has(k)) continue;
+      const before = usp.get(k);
+      const after  = fixOne(before);
+      if (after !== before) { usp.set(k, after); changed = true; }
+    }
+
+    if (changed) {
+      const q = usp.toString(); // re-encodea correcto
+      history.replaceState(null, '', (q ? '?' + q : location.pathname));
     }
   } catch (e) {
     console.warn('[Viz] No se pudo sanear query:', e);
   }
 
-  // --- Caja de diagnóstico ---
+  // --- Caja de diagnóstico (igual que la tuya) ---
   const box=document.createElement('div');
   box.style.cssText='position:fixed;bottom:8px;left:8px;z-index:999999;background:#000c;color:#fff;padding:8px 10px;border-radius:8px;font:12px system-ui;max-width:70vw;cursor:pointer';
   box.title='clic para cerrar'; box.onclick=()=>box.remove();
@@ -33,6 +46,7 @@
   ].join('<br/>');
   document.body.appendChild(box);
 })();
+
 
 
 // src/Visualization.js
