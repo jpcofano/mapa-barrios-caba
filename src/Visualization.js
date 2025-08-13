@@ -57,12 +57,28 @@ function colorFromScale(scaleName, t, invert) {
 function readStyle(message = {}) {
   const s = message?.styleById ?? {};
 
+  // Lee palettes de dos formas:
+  // 1) colorPalette (objeto avanzado, futuro)
+  // 2) customPalette (string con hex separados por coma, de tu Config.json)
   const getPalette = () => {
+    // A) Soporte actual: customPalette (TEXTINPUT)
+    const custom = (s?.customPalette?.value || '').toString().trim();
+    if (custom) {
+      const colors = custom
+        .split(',')
+        .map(x => x.trim())
+        .filter(x => /^#?[0-9a-f]{6}$/i.test(x))
+        .map(x => (x.startsWith('#') ? x : '#'+x));
+      if (colors.length) return { mode: 'custom', colors };
+    }
+    // B) Soporte futuro/avanzado: colorPalette (si existiera)
     const v = s?.colorPalette?.value;
-    if (!v) return null;
-    if (typeof v === 'string') return { mode: 'custom', colors: [v] };
-    const colors = v.colors || v.palette || v.values || [];
-    return { mode: v.mode || 'custom', colors: Array.isArray(colors) ? colors : [] };
+    if (v) {
+      if (typeof v === 'string') return { mode: 'custom', colors: [v] };
+      const colors = v.colors || v.palette || v.values || [];
+      return { mode: v.mode || 'custom', colors: Array.isArray(colors) ? colors : [] };
+    }
+    return null;
   };
 
   return {
@@ -87,6 +103,7 @@ function readStyle(message = {}) {
     colorPalette:    getPalette(),
   };
 }
+
 // (Alineado con tu Config moderno: ids y tipos de controls).  
 
 // ---------------------- Propiedad de nombre por feature ----------------------
@@ -505,6 +522,16 @@ function fmt(n) {
     try {
       // eslint-disable-next-line no-undef
       const dscc = (typeof window !== 'undefined') ? window.dscc : null;
+      // --- Diagnóstico DSCC (rápido): imprime estado inmediato y tardío ---
+      const _diag = () => console.log('[Diag] dscc?', {
+        exists: !!window.dscc,
+        subscribeToData: typeof window.dscc?.subscribeToData,
+        tableTransform: typeof window.dscc?.tableTransform,
+        objectTransform: typeof window.dscc?.objectTransform
+      });
+      _diag();
+      setTimeout(_diag, 1000);
+      setTimeout(_diag, 3000);
 
       if (dscc && typeof dscc.subscribeToData === 'function') {
         console.log('[Viz] initWrapper: dscc OK, suscribiendo con tableTransform');
@@ -582,10 +609,14 @@ function fmt(n) {
         }, { transform: dscc.tableTransform }); // <- USAMOS tableTransform
 
       } else {
-        console.warn('[Viz] initWrapper: dscc NO disponible, render dev local');
-        // Dev local: render mínimo
-        const container = ensureContainer();
-        drawVisualization(container, {});
+    // Dev local: render mínimo + cartel visible
+      const container = ensureContainer();
+      container.innerHTML = `
+        <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
+          <strong>Sin dscc:</strong> Agregá la viz desde <em>Componentes de la comunidad</em>
+          y verificá que la URL del manifest coincida con el bucket/version.
+        </div>`;
+      drawVisualization(container, {});
       }
     } catch (e) {
       console.error('[Viz] Error initWrapper:', e);
