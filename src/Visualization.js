@@ -606,38 +606,42 @@ function initWrapper(attempt = 1) {
     if (dscc && typeof dscc.subscribeToData === 'function') {
       console.log(`[Viz] initWrapper: dscc disponible en attempt ${attempt}`);
 
-      // Suscripción RAW (sin transform)
-      dscc.subscribeToData((rawData) => {
-        try {
-          console.groupCollapsed('[Viz] RAW subscribeToData (sin transform)');
-          console.log('Tipo de rawData:', typeof rawData);
-          console.log('Keys rawData:', Object.keys(rawData || {}));
-          console.log('Campos dimensiones (raw):', rawData?.fields?.dimensions || []);
-          console.log('Campos métricas (raw):', rawData?.fields?.metrics || []);
-          console.log('Filas DEFAULT (raw):', Array.isArray(rawData?.tables?.DEFAULT) ? rawData.tables.DEFAULT.length : 'no array');
-          if (Array.isArray(rawData?.tables?.DEFAULT)) {
-            console.log('Primeras filas RAW:', rawData.tables.DEFAULT.slice(0, 5));
-          }
-          console.groupEnd();
-        } catch (err) {
-          console.error('[Viz] Error procesando RAW data:', err);
-        }
-      });
-
       // Suscripción con tableTransform (la que usamos normalmente)
       dscc.subscribeToData((data) => {
         try {
-          console.groupCollapsed('[Viz] subscribeToData con tableTransform');
-          console.log('Dimensiones:', data?.fields?.dimensions || []);
-          console.log('Métricas:', data?.fields?.metrics || []);
+          console.group('[Viz] Datos con tableTransform');
+
+          const dims = data?.fields?.dimensions || [];
+          const mets = data?.fields?.metrics || [];
           const rows = data?.tables?.DEFAULT?.rows || [];
-          console.log(`Filas DEFAULT (transformadas): ${rows.length}`);
+          const headers = data?.tables?.DEFAULT?.headers || [];
+
+          console.log(`Dimensiones (${dims.length}):`, dims.map(d => d.name));
+          console.log(`Métricas (${mets.length}):`, mets.map(m => m.name));
+          console.log(`Headers tabla (${headers.length}):`, headers.map(h => h.name));
+          console.log(`Total de filas: ${rows.length}`);
+
           if (rows.length > 0) {
-            console.log('Primeras filas transformadas:', rows.slice(0, 5));
+            const sampleCount = Math.min(rows.length, 5);
+            console.log(`Mostrando ${sampleCount} filas de ejemplo:`);
+
+            // Mapea cada fila a un objeto {header: valor}
+            for (let i = 0; i < sampleCount; i++) {
+              const rowObj = {};
+              headers.forEach((h, idx) => {
+                rowObj[h.name] = rows[i][idx];
+              });
+              console.log(`Fila ${i + 1}:`, rowObj);
+            }
+          } else {
+            console.warn('[Viz] La tabla transformada no contiene filas.');
           }
+
           console.groupEnd();
 
+          console.log('[Viz] → Ejecutando drawVisualization...');
           drawVisualization(ensureContainer(), data);
+          console.log('[Viz] drawVisualization finalizó sin error.');
         } catch (err) {
           console.error('[Viz] Error procesando datos en subscribeToData (transform):', err);
         }
@@ -663,6 +667,7 @@ function initWrapper(attempt = 1) {
     console.error('[Viz] Error initWrapper:', e);
   }
 }
+
 
 
 
