@@ -584,110 +584,113 @@ function fmt(n) {
     return el;
   }
 
-  function initWrapper() {
-    try {
-      // eslint-disable-next-line no-undef
-      const dscc = (typeof window !== 'undefined') ? window.dscc : null;
-      // --- Diagnóstico DSCC (rápido): imprime estado inmediato y tardío ---
-      const _diag = () => console.log('[Diag] dscc?', {
-        exists: !!window.dscc,
+function initWrapper() {
+  try {
+    const _diag = (label) => {
+      console.log(`[Diag ${label}]`, {
+        time: new Date().toISOString(),
+        dsccExists: !!window.dscc,
+        dsccType: typeof window.dscc,
         subscribeToData: typeof window.dscc?.subscribeToData,
         tableTransform: typeof window.dscc?.tableTransform,
-        objectTransform: typeof window.dscc?.objectTransform
+        objectTransform: typeof window.dscc?.objectTransform,
+        locationHref: location.href
       });
-      _diag();
-      setTimeout(_diag, 1000);
-      setTimeout(_diag, 3000);
+    };
 
-      if (dscc && typeof dscc.subscribeToData === 'function') {
-        console.log('[Viz] initWrapper: dscc OK, suscribiendo con tableTransform');
+    _diag('start');
+    setTimeout(() => _diag('t+1s'), 1000);
+    setTimeout(() => _diag('t+3s'), 3000);
 
-        dscc.subscribeToData((data) => {
-          try {
-            // LOGS crudos del payload que llega del transform
-            console.log('[Viz] raw data keys:', Object.keys(data || {}));
-            console.log(
-              '[Viz] raw tables.DEFAULT type:',
-              Array.isArray(data?.tables?.DEFAULT) ? 'array (table rows)' : typeof data?.tables?.DEFAULT
-            );
-            console.log('[Viz] raw fields:', {
-              dimCount: Array.isArray(data?.fields?.dimensions) ? data.fields.dimensions.length : 0,
-              metCount: Array.isArray(data?.fields?.metrics) ? data.fields.metrics.length : 0
-            });
+    // eslint-disable-next-line no-undef
+    const dscc = (typeof window !== 'undefined') ? window.dscc : null;
 
-            // Usamos tableTransform y normalizamos a { tables.DEFAULT.headers, tables.DEFAULT.rows }
-            const isTable =
-              Array.isArray(data?.tables?.DEFAULT) &&
-              (Array.isArray(data?.fields?.dimensions) || Array.isArray(data?.fields?.metrics));
+    if (dscc && typeof dscc.subscribeToData === 'function') {
+      console.log('[Viz] initWrapper: dscc OK, suscribiendo con tableTransform');
 
-            let message;
+      dscc.subscribeToData((data) => {
+        try {
+          console.log('[Viz] raw data keys:', Object.keys(data || {}));
+          console.log('[Viz] raw tables.DEFAULT type:',
+            Array.isArray(data?.tables?.DEFAULT) ? 'array (table rows)' : typeof data?.tables?.DEFAULT
+          );
+          console.log('[Viz] raw fields:', {
+            dimCount: Array.isArray(data?.fields?.dimensions) ? data.fields.dimensions.length : 0,
+            metCount: Array.isArray(data?.fields?.metrics) ? data.fields.metrics.length : 0
+          });
 
-            if (isTable) {
-              // tableTransform → headers = dims+metrics ; rows = dims+metrics por fila
-              const dimFields = Array.isArray(data.fields?.dimensions) ? data.fields.dimensions : [];
-              const metFields = Array.isArray(data.fields?.metrics) ? data.fields.metrics : [];
+          const isTable =
+            Array.isArray(data?.tables?.DEFAULT) &&
+            (Array.isArray(data?.fields?.dimensions) || Array.isArray(data?.fields?.metrics));
 
-              const headers = [...dimFields, ...metFields].map((f, i) => ({
-                id:   (f?.id || f?.name || `c${i}`),
-                name: (f?.name || f?.id  || `c${i}`)
-              }));
+          let message;
 
-              const rows = (data.tables?.DEFAULT || []).map(r => [
-                ...(Array.isArray(r.dimensions) ? r.dimensions : []),
-                ...(Array.isArray(r.metrics)    ? r.metrics    : [])
-              ]);
+          if (isTable) {
+            const dimFields = Array.isArray(data.fields?.dimensions) ? data.fields.dimensions : [];
+            const metFields = Array.isArray(data.fields?.metrics) ? data.fields.metrics : [];
 
-              // LOGS de normalización
-              console.log('[Viz] normalized headers:', headers.map(h => h.name));
-              console.log('[Viz] normalized rows.length:', rows.length);
+            const headers = [...dimFields, ...metFields].map((f, i) => ({
+              id:   (f?.id || f?.name || `c${i}`),
+              name: (f?.name || f?.id || `c${i}`)
+            }));
 
-              message = {
-                styleById: data?.style?.styleParamsByConfigId || {},
-                fieldsByConfigId: data?.fieldsByConfigId || {},
-                tables: { DEFAULT: { headers, rows } }
-              };
-            } else {
-              // Caso alterno: ya viene objeto con headers/rows
-              console.warn('[Viz] data no parece tableTransform. Reenviando tables tal como llegan.');
-              message = {
-                styleById: data?.style?.styleParamsByConfigId || data?.styleById || {},
-                fieldsByConfigId: data?.fieldsByConfigId || {},
-                tables: data?.tables || {}
-              };
-            }
+            const rows = (data.tables?.DEFAULT || []).map(r => [
+              ...(Array.isArray(r.dimensions) ? r.dimensions : []),
+              ...(Array.isArray(r.metrics)    ? r.metrics    : [])
+            ]);
 
-            // LOGS de estilo y fields
-            try {
-              console.log('[Viz] styleById keys:', Object.keys(message.styleById || {}));
-              console.log('[Viz] fieldsByConfigId keys:', Object.keys(message.fieldsByConfigId || {}));
-              const t = message.tables?.DEFAULT || {};
-              console.log('[Viz] message.tables.DEFAULT headers:', (t.headers || []).map(h => h?.name || h?.id));
-              console.log('[Viz] message.tables.DEFAULT rows.length:', Array.isArray(t.rows) ? t.rows.length : 0);
-            } catch (logErr) {
-              console.warn('[Viz] log inner error:', logErr);
-            }
+            console.log('[Viz] normalized headers:', headers.map(h => h.name));
+            console.log('[Viz] normalized rows.length:', rows.length);
 
-            const container = ensureContainer();
-            drawVisualization(container, message);
-          } catch (e) {
-            console.error('[Viz] onData error:', e);
+            message = {
+              styleById: data?.style?.styleParamsByConfigId || {},
+              fieldsByConfigId: data?.fieldsByConfigId || {},
+              tables: { DEFAULT: { headers, rows } }
+            };
+          } else {
+            console.warn('[Viz] data no parece tableTransform. Reenviando tables tal como llegan.');
+            message = {
+              styleById: data?.style?.styleParamsByConfigId || data?.styleById || {},
+              fieldsByConfigId: data?.fieldsByConfigId || {},
+              tables: data?.tables || {}
+            };
           }
-        }, { transform: dscc.tableTransform }); // <- USAMOS tableTransform
 
-      } else {
-    // Dev local: render mínimo + cartel visible
+          try {
+            console.log('[Viz] styleById keys:', Object.keys(message.styleById || {}));
+            console.log('[Viz] fieldsByConfigId keys:', Object.keys(message.fieldsByConfigId || {}));
+            const t = message.tables?.DEFAULT || {};
+            console.log('[Viz] message.tables.DEFAULT headers:', (t.headers || []).map(h => h?.name || h?.id));
+            console.log('[Viz] message.tables.DEFAULT rows.length:', Array.isArray(t.rows) ? t.rows.length : 0);
+          } catch (logErr) {
+            console.warn('[Viz] log inner error:', logErr);
+          }
+
+          const container = ensureContainer();
+          drawVisualization(container, message);
+        } catch (e) {
+          console.error('[Viz] onData error:', e);
+        }
+      }, { transform: dscc.tableTransform });
+
+    } else {
+      console.warn('[Viz] initWrapper: dscc NO disponible, usando fallback.');
+      console.log('[Viz] Contenido actual de window:', Object.keys(window));
+
       const container = ensureContainer();
       container.innerHTML = `
         <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
-          <strong>Sin dscc:</strong> Agregá la viz desde <em>Componentes de la comunidad</em>
-          y verificá que la URL del manifest coincida con el bucket/version.
+          <strong>Sin dscc:</strong> No se detecta API de Looker Studio.<br/>
+          Verificá que la viz esté insertada como <em>Componente de la comunidad</em> en un informe real.
         </div>`;
       drawVisualization(container, {});
-      }
-    } catch (e) {
-      console.error('[Viz] Error initWrapper:', e);
     }
+
+  } catch (e) {
+    console.error('[Viz] Error initWrapper:', e);
   }
+}
+
 
   // --- invocación segura del wrapper ---
   if (document.readyState === 'loading') {
