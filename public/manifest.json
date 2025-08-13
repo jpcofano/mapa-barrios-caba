@@ -9,6 +9,7 @@
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
   "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/package.html",
   "devMode": true,
+  "sandboxMode": "IFRAME",
   "components": [
     {
       "id": "70371890barrios-caba-map-v2025aa",
