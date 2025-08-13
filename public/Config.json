@@ -5,10 +5,10 @@
       "label": "Datos",
       "elements": [
         {
-          "id": "geoDimension",
+          "id": "Barrio",
           "label": "Dimensión de Texto (GeoJSON ID)",
           "type": "DIMENSION",
-          "options": { "min": 1, "max": 1, "supportedTypes": ["DEFAULT"] }
+          "options": { "min": 1, "max": 1, "supportedTypes": ["TEXT"] }
         },
         {
           "id": "metricPrimary",
@@ -91,14 +91,15 @@
         {
           "id": "borderColor",
           "label": "Color del borde",
-          "type": "BORDER_COLOR",
+          "type": "COLOR",
           "defaultValue": { "color": "#000000" }
         },
         {
           "id": "borderWidth",
           "label": "Grosor del borde",
-          "type": "LINE_WEIGHT",
-          "defaultValue": 1
+          "type": "INTERVAL",
+          "defaultValue": 1,
+          "options": { "min": 0, "max": 5, "step": 0.5 }
         },
         {
           "id": "borderOpacity",
@@ -145,7 +146,7 @@
         {
           "id": "colorMissing",
           "label": "Color sin dato",
-          "type": "FILL_COLOR",
+          "type": "COLOR",
           "defaultValue": { "color": "#cccccc" }
         },
         {

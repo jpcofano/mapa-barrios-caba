@@ -315,87 +315,72 @@ try {
 }
 */
 function buildValueMap(message) {
-  // 1) Campos configurados (moderno)
   const fbc = message?.fieldsByConfigId || {};
   const modernDim = Array.isArray(fbc?.geoDimension) ? fbc.geoDimension[0] : null;
   const modernMet = Array.isArray(fbc?.metricPrimary) ? fbc.metricPrimary[0] : null;
-
-  // 2) Legacy (orden DIM, MET)
-  const legacyMain = fbc?.mainData?.elements || null;
-
-  // 3) Tabla (objectTransform / tableTransform)
   const table = message?.tables?.DEFAULT || {};
-  const fieldIds = Array.isArray(table.fields) ? table.fields
-                  : (Array.isArray(table.headers) ? table.headers : []);
-  const rows = Array.isArray(table.rows) ? table.rows
-              : (Array.isArray(table.data) ? table.data : []);
+  const fieldIds = Array.isArray(table.fields) ? table.fields : (Array.isArray(table.headers) ? table.headers : []);
+  const rows = Array.isArray(table.rows) ? table.rows : (Array.isArray(table.data) ? table.data : []);
 
-  // Debug básico
-  try {
-    console.log('[Viz] table keys:', Object.keys(table));
-    console.log('[Viz] fields/headers:', (fieldIds || []).map(f => f?.name || f?.id));
-    console.log('[Viz] rows.length:', Array.isArray(rows) ? rows.length : 0);
-    console.log('[Viz] fieldsByConfigId:', Object.keys(message?.fieldsByConfigId || {}));
-  } catch {}
+  // Debug
+  console.log('[Viz] table keys:', Object.keys(table));
+  console.log('[Viz] fields/headers:', fieldIds.map(f => f?.id || f?.name));
+  console.log('[Viz] rows.length:', rows.length);
+  console.log('[Viz] fieldsByConfigId:', Object.keys(fbc));
 
-  // 4) Detectar índices
   let idxDim = -1, idxMet = -1;
+  let keyFieldId, valFieldId;
 
-  // 4a) Legacy por posición
-  if (legacyMain && legacyMain.length >= 2) {
-    idxDim = 0;
-    idxMet = 1;
-  }
-
-  // 4b) Moderno por nombre/id exacto
-  if ((idxDim < 0 || idxMet < 0) && (modernDim || modernMet)) {
-    const wantedDim = (modernDim?.name || modernDim?.id || '').toString().toLowerCase();
-    const wantedMet = (modernMet?.name || modernMet?.id || '').toString().toLowerCase();
+  // Moderno: usar IDs de fieldsByConfigId
+  if (modernDim && modernMet) {
+    keyFieldId = modernDim.id || modernDim.name;
+    valFieldId = modernMet.id || modernMet.name;
     fieldIds.forEach((f, i) => {
-      const nm = (f?.name || f?.id || '').toString().toLowerCase();
-      if (idxDim < 0 && wantedDim && nm === wantedDim) idxDim = i;
-      if (idxMet < 0 && wantedMet && nm === wantedMet) idxMet = i;
+      const nm = (f?.id || f?.name || '').toString().toLowerCase();
+      if (keyFieldId.toLowerCase() === nm) idxDim = i;
+      if (valFieldId.toLowerCase() === nm) idxMet = i;
     });
   }
 
-  // 4c) Heurística (DIM por barrio/comuna/nombre; MET por valor/métrica/etc.)
-  if ((idxDim < 0 || idxMet < 0) && Array.isArray(fieldIds)) {
-    const dimIdx = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(f?.name || f?.id || ''));
-    const metIdx = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(f?.name || f?.id || ''));
-    if (idxDim < 0 && dimIdx >= 0) idxDim = dimIdx;
-    if (idxMet < 0 && metIdx >= 0) idxMet = metIdx;
+  // Legacy o heurística
+  if (idxDim < 0 || idxMet < 0) {
+    idxDim = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(f?.name || f?.id || ''));
+    idxMet = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(f?.name || f?.id || ''));
   }
 
-  // 4d) Fallback: primera columna numérica (escaneo de muestra)
-  if (idxMet < 0 && Array.isArray(fieldIds) && Array.isArray(rows) && rows.length) {
+  // Fallback numérico para métrica
+  if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
     const isNumericCol = (colIdx) => {
       let hits = 0, seen = 0;
       for (let r = 0; r < sampleN; r++) {
-        const cell = rows[r]?.[colIdx];
+        const row = rows[r];
+        const cell = Array.isArray(row) ? row[colIdx] : row[fieldIds[colIdx]?.id || fieldIds[colIdx]?.name];
         const n = Number(cell?.v ?? cell?.value ?? cell);
         if (!Number.isNaN(n)) hits++;
         seen++;
       }
-      return seen > 0 && hits / seen >= 0.6; // ≥60% numérica
+      return seen > 0 && hits / seen >= 0.6;
     };
     for (let i = 0; i < fieldIds.length; i++) {
       if (i !== idxDim && isNumericCol(i)) { idxMet = i; break; }
     }
   }
 
+  if (idxDim < 0 || idxMet < 0) {
+    console.warn('[Viz] No se encontraron campos válidos para dimensión/métrica');
+    return { map: new Map(), min: NaN, max: NaN, count: 0 };
+  }
+
+  keyFieldId = keyFieldId || fieldIds[idxDim]?.id || fieldIds[idxDim]?.name;
+  valFieldId = valFieldId || fieldIds[idxMet]?.id || fieldIds[idxMet]?.name;
+
   const map = new Map();
   const values = [];
 
-  if (idxDim < 0 || idxMet < 0 || !rows.length) {
-    return { map, min: NaN, max: NaN, count: 0 };
-  }
-
-  // 5) Construir mapa clave normalizada -> valor
   for (const row of rows) {
-    const d = row[idxDim];
-    const m = row[idxMet];
-
+    const d = Array.isArray(row) ? row[idxDim] : row[keyFieldId];
+    const m = Array.isArray(row) ? row[idxMet] : row[valFieldId];
     const key = (d?.v ?? d?.value ?? d ?? '').toString();
     const val = Number(m?.v ?? m?.value ?? m);
 
@@ -408,15 +393,8 @@ function buildValueMap(message) {
   const min = values.length ? Math.min(...values) : NaN;
   const max = values.length ? Math.max(...values) : NaN;
 
-  // Debug muestra
-  try {
-    const sample = [];
-    let c = 0;
-    for (const [k, v] of map.entries()) { sample.push([k, v]); if (++c >= 5) break; }
-    console.log('[Viz] sample map entries:', sample);
-    console.log('[Viz] min/max/count:', min, max, values.length);
-  } catch {}
-
+  console.log('[Viz] sample map entries:', Array.from(map.entries()).slice(0, 5));
+  console.log('[Viz] min/max/count:', min, max, values.length);
   return { map, min, max, count: values.length };
 }
 
