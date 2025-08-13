@@ -650,10 +650,14 @@ function initWrapper(attempt = 1) {
     } else {
       if (attempt < 5) {
         console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
+        console.log('Href:', location.href);
+        console.log('Referrer:', document.referrer);
         setTimeout(() => initWrapper(attempt + 1), 1000);
       } else {
         console.error('[Viz] dscc no disponible tras 5 intentos, entrando en fallback.');
         console.log('[Viz] Contenido de window (keys):', Object.keys(window));
+                console.log('Href:', location.href);
+        console.log('Referrer:', document.referrer);
         const container = ensureContainer();
         container.innerHTML = `
           <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
