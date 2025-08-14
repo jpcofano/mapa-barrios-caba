@@ -1,34 +1,34 @@
-import path from 'path';
-import { fileURLToPath } from 'url';
+// vite.config.js
+import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
-
-export default {
-  base: '/',
-  assetsInclude: ['**/*.geojson'], // <-- habilita importar .geojson (con ?raw)
+export default defineConfig({
+  assetsInclude: ['**/*.geojson'], // permite importar geojson con ?raw
   build: {
-    outDir: 'dist',
-    emptyOutDir: true,
     target: 'es2018',
-    cssCodeSplit: false, // un solo CSS
+    cssCodeSplit: false, // 1 solo css
     lib: {
-      entry: path.resolve(__dirname, 'src/Visualization.js'),
-      name: 'Visualization',                 // nombre global del IIFE
-      fileName: () => 'Visualization.js',    // nombre fijo
-      formats: ['iife']
+      entry: resolve(__dirname, 'src/Visualization.js'),
+      name: 'Visualization',
+      formats: ['iife'],                 // Community Viz: bundle IIFE
+      fileName: () => 'Visualization.js' // nombre fijo
     },
     rollupOptions: {
       output: {
+        // 🔒 garantiza 1 solo bundle (sin chunks)
+        inlineDynamicImports: true,
         entryFileNames: 'Visualization.js',
         chunkFileNames: 'Visualization.js',
         assetFileNames: (assetInfo) => {
-          const ext = path.extname(assetInfo.name || '').toLowerCase();
-          if (ext === '.css') return 'Visualization.css'; // nombre fijo CSS
-          return '[name][extname]';
+          if (assetInfo.name && assetInfo.name.endsWith('.css')) {
+            return 'Visualization.css';  // css fijo
+          }
+          // otros assets (si los hubiera)
+          return assetInfo.name || 'assets/[name][extname]';
         }
       },
-      external: [] // bundlea todo
+      // 🔁 bundlear todo dentro (evita dependencias externas en runtime)
+      external: []
     }
   }
-};
+});
