@@ -15,6 +15,11 @@ const args = Object.fromEntries(process.argv.slice(2).map(arg => {
 let prefix = args.prefix || 'barrios-caba-map-v2025';
 let version = args.version || '';
 
+// --- Limpiar caracteres invisibles / NBSP ---
+const cleanInvisible = str => str.replace(/\u00A0/g, ' ').trim();
+prefix = cleanInvisible(prefix);
+version = cleanInvisible(version);
+
 // --- Normalizar prefix y version ---
 prefix = prefix.trim();
 version = version.trim();

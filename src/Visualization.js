@@ -5,7 +5,7 @@
       if (!val) return val;
       // Corrige NBSP/espacio después de "/{carpeta}" en URLs como gs://.../c barrios
       return String(val).replace(
-        /(gs:\/\/[^/]+\/[^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
+        /(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
         (_m, g1) => g1 + '/'
       );
     };
@@ -64,19 +64,28 @@ try {
   GEOJSON = { type: 'FeatureCollection', features: [] };
 }
 
-// ---------------------- Utils de texto/colores ----------------------
-const stripDiacritics = (s) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-const normalizeKey = (s) => stripDiacritics(s).trim().toLowerCase();
+// ---------------------- Limpieza robusta ----------------------
+// Quita tildes, NBSP, espacios invisibles, colapsa espacios y normaliza a minúsculas
+function cleanString(s) {
+  return String(s ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // diacríticos
+    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g, ' ') // NBSP + zero-width + separadores
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Normalizaciones de clave para matching (sobre cleanString)
+const normalizeKey = (s) => cleanString(s);
 const normalizeKeyFuzzy = (s) => {
-  const raw = stripDiacritics(String(s ?? '').trim().toLowerCase());
-  const set = new Set([
-    raw,
-    raw.replace(/\s+/g, ' '),
-    raw.replace(/\s+/g, ''),
-    raw.replace(/[^\p{L}\p{N}]+/gu, '')
-  ]);
-  return Array.from(set);
+  const raw = cleanString(s);
+  const compact = raw.replace(/\s+/g, '');
+  const alnum = raw.replace(/[^\p{L}\p{N}]+/gu, '');
+  return Array.from(new Set([raw, compact, alnum]));
 };
+
+// Utilidades numéricas y color
 const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
 const lerp = (a, b, t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2, '0');
@@ -196,8 +205,8 @@ function buildValueMap(message) {
     valFieldId = modernMet.id || modernMet.name;
     fieldIds.forEach((f, i) => {
       const nm = (f?.id || f?.name || '').toString().toLowerCase();
-      if (keyFieldId.toLowerCase() === nm) idxDim = i;
-      if (valFieldId.toLowerCase() === nm) idxMet = i;
+      if ((keyFieldId || '').toLowerCase() === nm) idxDim = i;
+      if ((valFieldId || '').toLowerCase() === nm) idxMet = i;
     });
   }
 
@@ -238,7 +247,8 @@ function buildValueMap(message) {
   for (const row of rows) {
     const d = Array.isArray(row) ? row[idxDim] : row[keyFieldId];
     const m = Array.isArray(row) ? row[idxMet] : row[valFieldId];
-    const key = (d?.v ?? d?.value ?? d ?? '').toString();
+    const keyRaw = (d?.v ?? d?.value ?? d ?? '').toString();
+    const key = normalizeKey(keyRaw); // limpieza fuerte
     const val = Number(m?.v ?? m?.value ?? m);
 
     if (key && Number.isFinite(val)) {
@@ -269,10 +279,10 @@ export default function drawVisualization(container, message = {}) {
   const map = L.map(container, { zoomControl: true, attributionControl: true });
 
   const styleFn = (feature) => {
-    const nombre = getFeatureNameProp(feature, nivel, style.geojsonProperty);
+    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
     let v;
     if (stats?.map?.size) {
-      for (const k of normalizeKeyFuzzy(nombre)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+      for (const k of normalizeKeyFuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
     }
     let fillColor;
     if (stats?.map?.size && Number.isFinite(v)) {
@@ -299,16 +309,17 @@ export default function drawVisualization(container, message = {}) {
   const layer = L.geoJSON(geojson, {
     style: styleFn,
     onEachFeature: (feature, lyr) => {
-      const nombre = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
+      const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
+      const nombreLabel = String(nombreRaw); // mantener etiqueta original para UI
       if (style.showLabels) {
-        lyr.bindTooltip(String(nombre), { sticky: true, direction: 'center' });
+        lyr.bindTooltip(nombreLabel, { sticky: true, direction: 'center' });
       }
       let v;
       if (stats?.map?.size) {
-        for (const k of normalizeKeyFuzzy(nombre)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+        for (const k of normalizeKeyFuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
       }
       const content = (style.popupFormat || '')
-        .replace(/\{\{\s*nombre\s*\}\}/gi, String(nombre))
+        .replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel)
         .replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? String(v) : 's/d');
       lyr.bindPopup(content, { closeButton: false });
     }
@@ -460,7 +471,7 @@ function fmt(n) {
               Asegúrate de:
               <ul>
                 <li>Insertar la viz como componente comunitario en un informe.</li>
-                <li>Verificar que las URLs del manifest (js/config/css) sean accesibles.</li>
+                <li>Verificar que las URL del manifest (js/config/css) sean accesibles.</li>
                 <li>Comprobar la consola para errores de red o CSP.</li>
               </ul>
             </div>`;
