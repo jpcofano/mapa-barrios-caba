@@ -1,87 +1,107 @@
-name: Deploy GCS
+name: Build & Deploy Community Viz
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Versión a usar (ej. V2025)"
+      prefix:
+        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025e)"
         required: true
-        default: "V2025"
+        default: "barrios-caba-map-v2025e"
+      version:
+        description: "Sufijo de versión (opcional, ej: e)"
+        required: false
+        default: ""
+      devMode:
+        description: "Forzar devMode en manifest (true|false, opcional)"
+        required: false
+        default: ""
 
 permissions:
-  id-token: write
   contents: read
-
+  id-token: write   # necesario para OIDC (auth@v2)
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: "20"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # --- AUTH con WIF ---
-      - name: Auth to Google Cloud (WIF)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Prepara carpeta destino y actualiza manifest/rutas
+      - name: Prepare version
+        run: |
+          if [ -n "${{ inputs.version }}" ] && [ -n "${{ inputs.devMode }}" ]; then
+            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --version="${{ inputs.version }}" --devMode="${{ inputs.devMode }}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --version="${{ inputs.version }}"
+          elif [ -n "${{ inputs.devMode }}" ]; then
+            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --devMode="${{ inputs.devMode }}"
+          else
+            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}"
+          fi
+
+      - name: Build (Vite)
+        run: npm run build
+
+      # Sanitizar manifest (NBSP/zero-width) y verificar
+      - name: Sanitize manifest (inline)
+        run: |
+          node -e "const fs=require('fs');let t=fs.readFileSync('public/manifest.json','utf8');t=t.replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ').replace(/[\t\r\n]+/g,' ').replace(/\s{2,}/g,' ').trim();fs.writeFileSync('public/manifest.json',t)"
+      - name: Check manifest for NBSP/ZW
+        run: |
+          node -e "const s=require('fs').readFileSync('public/manifest.json','utf8');if(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/.test(s)){console.error('NBSP/zero-width detectado en manifest.json');process.exit(1)}"
+
+      # Assert single bundle y (heurística) dscc en bundle
+      - name: Assert single bundle (no dynamic import)
+        run: |
+          test -f dist/Visualization.js
+          if grep -q "import(" dist/Visualization.js; then
+            echo "❌ import() dinámicos en bundle"; exit 1
+          else
+            echo "✅ Sin import() dinámicos"
+          fi
+          ls -la dist
+          if grep -qi "subscribeToData" dist/Visualization.js; then
+            echo "✅ dscc parece bundleado (subscribeToData detectado)"
+          else
+            echo "ℹ️ No se encontró 'subscribeToData' (puede estar minificado); seguimos"
+          fi
+
+      - name: Export BUCKET_PATH
+        run: echo "BUCKET_PATH=$(cat .bucket_path)" >> $GITHUB_ENV
+
+      # Auth GCP por OIDC (usar Workload Identity Federation)
+      - name: Auth to Google Cloud (OIDC)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      - name: Setup gcloud (with gsutil)
+      - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          install_components: gsutil
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Prepare manifest version
+      - name: Deploy to GCS
         run: |
-          node scripts/prepare-version.mjs \
-            --prefix="barrios-caba-map-${{ github.event.inputs.version }}" \
-            --version="${{ github.event.inputs.version }}"
-
-      - name: Clean manifest.json (NBSP & spaces)
-        run: |
-          echo "🔍 Revisando manifest.json..."
-          cat -v public/manifest.json || true
-
-          # Reemplazar NBSP (0xA0) por espacio normal
-          sed -i 's/\xC2\xA0/ /g' public/manifest.json
-
-          # Quitar espacios extra en IDs
-          sed -i 's/"id": *"\([^"]*\)"/"id": "\1"/g' public/manifest.json
-
-          echo "✅ Manifest limpio:"
-          cat -v public/manifest.json || true
-
-      - name: Build
-        run: npm run build
-
-      - name: Deploy JS
-        run: |
-          BUCKET_PATH=$(cat .bucket_path)
-          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
-            && gsutil -h "Content-Type: application/javascript" \
-                      -h "Cache-Control: no-store" \
-                      cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
-
-      - name: Deploy CSS
-        run: |
-          BUCKET_PATH=$(cat .bucket_path)
-          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
-            && gsutil -h "Content-Type: text/css" \
-                      -h "Cache-Control: no-store" \
-                      cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
-
-      - name: Deploy assets
-        run: |
-          BUCKET_PATH=$(cat .bucket_path)
-          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
-            && gsutil -m cp -r public/* "$BUCKET_PATH/"
+          echo "Deploying to $BUCKET_PATH"
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/javascript" cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+          if [ -f dist/Visualization.css ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type:text/css" cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+          fi
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/json" cp public/Config.json "$BUCKET_PATH/Config.json"
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/json" cp public/manifest.json "$BUCKET_PATH/manifest.json"
+          if [ -f public/Icon.png ]; then gsutil -m -h "Cache-Control:no-store" -h "Content-Type:image/png" cp public/Icon.png "$BUCKET_PATH/Icon.png"; fi
+          if [ -f public/Logo.png ]; then gsutil -m -h "Cache-Control:no-store" -h "Content-Type:image/png" cp public/Logo.png "$BUCKET_PATH/Logo.png"; fi

@@ -1,3 +1,5 @@
+// NUEVO: trae la API desde el paquete
+import * as dscc from '@google/dscc';
 (function(){
   // --- Sanitizador de NBSP / espacios en vizId, js, css ---
   try {
@@ -420,90 +422,122 @@ function fmt(n) {
     return el;
   }
 
-  function initWrapper(attempt = 1) {
-    try {
-      if (window.parent !== window) {
-        console.log('[Viz] Cargado en iframe – dscc debería inyectarse.');
-      } else {
-        console.warn('[Viz] No en iframe – dscc no se inyectará. Usa un report real.');
-      }
+ function initWrapper(attempt = 1) {
+  try {
+    const MAX_ATTEMPTS = 5;
 
-      const _diag = (label, extra = {}) => {
-        console.log(`[Diag ${label}]`, {
-          time: new Date().toISOString(),
-          dsccExists: !!window.dscc,
-          dsccType: typeof window.dscc,
-          subscribeToDataType: typeof window.dscc?.subscribeToData,
-          tableTransformType: typeof window.dscc?.tableTransform,
-          objectTransformType: typeof window.dscc?.objectTransform,
-          locationHref: location.href,
-          referrer: document.referrer,
-          ...extra
-        });
-      };
-
-      _diag(`attempt-${attempt}`);
-
-      const dscc = window.dscc;
-      if (dscc && typeof dscc.subscribeToData === 'function') {
-        console.log(`[Viz] dscc disponible en attempt ${attempt}`);
-        dscc.subscribeToData((data) => {
-          try {
-            console.group('[Viz] Datos con objectTransform');
-            console.log('[Viz] data:', JSON.stringify(data, null, 2));
-            drawVisualization(ensureContainer(), data);
-            console.groupEnd();
-          } catch (err) {
-            console.error('[Viz] Error procesando datos:', err);
-          }
-        }, { transform: dscc.objectTransform });
-      } else {
-        if (attempt < 5) {
-          console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
-          setTimeout(() => initWrapper(attempt + 1), 1000);
-        } else {
-          console.error('[Viz] dscc no disponible tras 5 intentos.');
-          _diag('fallback');
-          const container = ensureContainer();
-          container.innerHTML = `
-            <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px">
-              <strong>Error:</strong> No se detectó la API de Looker Studio.<br/>
-              Asegúrate de:
-              <ul>
-                <li>Insertar la viz como componente comunitario en un informe.</li>
-                <li>Verificar que las URL del manifest (js/config/css) sean accesibles.</li>
-                <li>Comprobar la consola para errores de red o CSP.</li>
-              </ul>
-            </div>`;
-          // Datos mock para pruebas locales
-          const mockData = {
-            tables: {
-              DEFAULT: {
-                fields: [{ id: "barrio", name: "Barrio" }, { id: "poblacion", name: "Población" }],
-                rows: [
-                  { barrio: "Palermo", poblacion: 225000 },
-                  { barrio: "Recoleta", poblacion: 188000 }
-                ]
-              }
-            },
-            fieldsByConfigId: {
-              geoDimension: [{ id: "barrio", name: "Barrio" }],
-              metricPrimary: [{ id: "poblacion", name: "Población" }]
-            }
-          };
-          drawVisualization(container, mockData);
-        }
-      }
-    } catch (e) {
-      console.error('[Viz] Error initWrapper:', e);
+    if (window.parent !== window) {
+      console.log('[Viz] Cargado en iframe – dscc debería inyectarse o venir bundleado.');
+    } else {
+      console.warn('[Viz] No en iframe – dscc del host no se inyectará. Usá un informe real o mock.');
     }
-  }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      try { console.log('[Viz] DOMContentLoaded → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
-    });
-  } else {
-    try { console.log('[Viz] DOM listo → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
+    const _diag = (label, extra = {}) => {
+      console.log(`[Diag ${label}]`, {
+        time: new Date().toISOString(),
+        dsccWindowExists: !!window.dscc,
+        dsccWindowType: typeof window.dscc,
+        dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
+        dsccWindowObjectTransform: typeof window.dscc?.objectTransform,
+        dsccModuleExists: !!dsccModule,
+        dsccModuleSubscribeType: typeof dsccModule?.subscribeToData,
+        dsccModuleObjectTransform: typeof dsccModule?.objectTransform,
+        locationHref: location.href,
+        referrer: document.referrer,
+        attempt,
+        ...extra
+      });
+    };
+
+    _diag(`attempt-${attempt}`);
+
+    // Resuelve DSCC: primero el módulo bundleado, luego window.dscc si existe
+    const dsccResolved =
+      (dsccModule && typeof dsccModule.subscribeToData === 'function')
+        ? dsccModule
+        : (window.dscc && typeof window.dscc.subscribeToData === 'function')
+          ? window.dscc
+          : null;
+
+    if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
+      console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
+        dsccFrom: dsccResolved === dsccModule ? 'module' : 'window',
+        hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
+      });
+
+      dsccResolved.subscribeToData((data) => {
+        try {
+          console.group('[Viz] Datos con objectTransform');
+          console.log('[Viz] data:', JSON.stringify(data, null, 2));
+          drawVisualization(ensureContainer(), data);
+          console.groupEnd();
+        } catch (err) {
+          console.error('[Viz] Error procesando datos:', err);
+        }
+      }, { transform: dsccResolved.objectTransform });
+
+      return; // listo: estamos suscriptos
+    }
+
+    // Si todavía no hay dscc, reintenta hasta MAX_ATTEMPTS
+    if (attempt < MAX_ATTEMPTS) {
+      console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
+      setTimeout(() => initWrapper(attempt + 1), 1000);
+      return;
+    }
+
+    // Fallback definitivo (mock) luego de agotar reintentos
+    console.error('[Viz] dscc no disponible tras 5 intentos. Entrando en fallback (mock).');
+    _diag('fallback');
+
+    const container = ensureContainer();
+    container.innerHTML = `
+      <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px; margin-bottom:8px">
+        <strong>Sin dscc:</strong> No se pudo inicializar la API de Looker Studio.<br/>
+        Revisá:
+        <ul style="margin:6px 0 0 18px">
+          <li>Que el manifiesto sea el correcto y la viz esté agregada desde ese manifest.</li>
+          <li>Que la fuente de datos tenga habilitado <em>Community visualization access</em>.</li>
+          <li>Que <code>Config.json</code> no tenga <code>defaultValue</code> en <code>data.elements</code> (solo en <code>style</code>).</li>
+        </ul>
+      </div>`;
+
+    // Datos mock para pruebas locales/fallback
+    const mockData = {
+      tables: {
+        DEFAULT: {
+          fields: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
+          rows: [
+            { barrio: 'Palermo',  poblacion: 225000 },
+            { barrio: 'Recoleta', poblacion: 188000 }
+          ]
+        }
+      },
+      fieldsByConfigId: {
+        geoDimension:  [{ id: 'barrio',    name: 'Barrio' }],
+        metricPrimary: [{ id: 'poblacion', name: 'Población' }]
+      }
+    };
+    drawVisualization(container, mockData);
+
+  } catch (e) {
+    console.error('[Viz] Error initWrapper:', e);
   }
+}
+
+// boot strap
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      console.log('[Viz] DOMContentLoaded → initWrapper()');
+      initWrapper();
+    } catch (e) { console.error(e); }
+  });
+} else {
+  try {
+    console.log('[Viz] DOM listo → initWrapper()');
+    initWrapper();
+  } catch (e) { console.error(e); }
+}
+
 })();
