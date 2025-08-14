@@ -432,32 +432,34 @@ function fmt(n) {
       console.warn('[Viz] No en iframe – dscc del host no se inyectará. Usá un informe real o mock.');
     }
 
-    const _diag = (label, extra = {}) => {
-      console.log(`[Diag ${label}]`, {
-        time: new Date().toISOString(),
-        dsccWindowExists: !!window.dscc,
-        dsccWindowType: typeof window.dscc,
-        dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
-        dsccWindowObjectTransform: typeof window.dscc?.objectTransform,
-        dsccModuleExists: !!dsccModule,
-        dsccModuleSubscribeType: typeof dsccModule?.subscribeToData,
-        dsccModuleObjectTransform: typeof dsccModule?.objectTransform,
-        locationHref: location.href,
-        referrer: document.referrer,
-        attempt,
-        ...extra
-      });
-    };
+// --- diagnóstico seguro (no rompe si no existe dsccModule) ---
+const dsccModuleExists = (typeof dsccModule !== 'undefined') && !!dsccModule;
+const dsccModuleSubType = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.subscribeToData : 'undefined';
+const dsccModuleObjType = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.objectTransform  : 'undefined';
 
-    _diag(`attempt-${attempt}`);
+const _diag = (label, extra = {}) => {
+  console.log(`[Diag ${label}]`, {
+    time: new Date().toISOString(),
+    dsccWindowExists: !!window.dscc,
+    dsccWindowType: typeof window.dscc,
+    dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
+    dsccWindowObjectTransform: typeof window.dscc?.objectTransform,
+    dsccModuleExists,
+    dsccModuleSubscribeType: dsccModuleSubType,
+    dsccModuleObjectTransform: dsccModuleObjType,
+    locationHref: location.href,
+    referrer: document.referrer,
+    attempt,
+    ...extra
+  });
+};
 
-    // Resuelve DSCC: primero el módulo bundleado, luego window.dscc si existe
-    const dsccResolved =
-      (dsccModule && typeof dsccModule.subscribeToData === 'function')
-        ? dsccModule
-        : (window.dscc && typeof window.dscc.subscribeToData === 'function')
-          ? window.dscc
-          : null;
+// --- resolución segura del proveedor dscc (módulo → window → null) ---
+const dsccResolved =
+  (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
+  (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
+  null;
+
 
     if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
       console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
