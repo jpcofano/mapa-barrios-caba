@@ -7,7 +7,7 @@
   "organizationUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
-  "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/package.html",
+  "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/barrios-caba-map-v2025/",
   "devMode": true,
   "sandboxMode": "IFRAME",
   "components": [
@@ -17,9 +17,8 @@
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
       "resource": {
-        "js": "https://storage.googleapis.com/mapa-barrios-degcba/Visualization.js",
-        "config": "https://storage.googleapis.com/mapa-barrios-degcba/Config.json",
-        "css": "https://storage.googleapis.com/mapa-barrios-degcba/Visualization.css"
+        "js": "gs://mapa-barrios-degcba/barrios-caba-map-v2025/Visualization.js",
+        "config": "gs://mapa-barrios-degcba/barrios-caba-map-v2025/Config.json"
       }
     }
   ]

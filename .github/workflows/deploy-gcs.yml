@@ -1,103 +1,57 @@
-name: Deploy to GCS (Vite + prepare-version)
+name: Deploy to Google Cloud Storage
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Subcarpeta de deploy (ej: hotfix-cache). Vacío => YYYYMMDD'
-        required: false
-        default: ''
-      prefix:
-        description: 'Prefijo de carpeta (default: barrios-caba-map-v2025)'
-        required: false
-        default: ''
-
-permissions:
-  contents: read
-  id-token: write
-
-env:
-  SYNC_DIR: dist
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
 
-      - name: Build (Vite)
+      # 🔹 Paso 1: preparar versión limpia
+      - name: Prepare manifest version
+        run: node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025" --version="$(date +%Y%m%d)"
+
+      # 🔹 Paso 2: limpieza adicional de NBSP y espacios raros
+      - name: Extra clean manifest.json
+        run: |
+          echo "🔍 Revisando manifest.json..."
+          cat -v public/manifest.json
+          sed -i 's/\xC2\xA0/ /g' public/manifest.json
+          sed -i 's/"id": *"\([^"]*\)"/"id": "\1"/g' public/manifest.json
+          echo "✅ Manifest limpio:"
+          cat -v public/manifest.json
+
+      # 🔹 Paso 3: build del proyecto
+      - name: Build project
         run: npm run build
 
-      # === Ejecuta tu script para definir carpeta destino y reescribir manifest ===
-      - name: Prepare version (rewrite manifest + .bucket_path)
-        run: |
-          node scripts/prepare-version.mjs \
-            --version="${{ github.event.inputs.version }}" \
-            --prefix="${{ github.event.inputs.prefix }}"
-        # El script:
-        # - reescribe public/manifest.json apuntando a <FOLDER>
-        # - emite .bucket_path con gs://.../<FOLDER>
-        # - emite .manifest_gs_url y .manifest_http_url
-
-      # === Copiar manifest y config dentro de dist/ para que rsync los suba ===
-      - name: Copy manifest/config into dist
-        run: |
-          cp -f public/manifest.json dist/ || true
-          # Si tu Config.json vive en public/, copialo también:
-          if [ -f public/Config.json ]; then cp -f public/Config.json dist/; fi
-
-      # --- AUTH con WIF ---
+      # 🔹 Paso 4: auth GCP
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      - name: Setup gcloud (with gsutil)
+      - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
           install_components: gsutil
 
-      - name: Sanity check build dir
-        run: |
-          [ -d "${SYNC_DIR}" ] || (echo "No existe ${SYNC_DIR}" && exit 1)
-          ls -la "${SYNC_DIR}"
-
-      - name: Upload (rsync to bucket path)
+      # 🔹 Paso 5: deploy a GCS
+      - name: Deploy to GCS
         run: |
           BUCKET_PATH=$(cat .bucket_path)
-          echo "Deploy to: ${BUCKET_PATH}"
-          gsutil -m rsync -r -d "${SYNC_DIR}" "${BUCKET_PATH}"
-
-      - name: Set MIME and cache headers
-        run: |
-          BUCKET_PATH=$(cat .bucket_path)
-          # Tipos MIME explícitos
-          gsutil -m setmeta -h "Content-Type: application/javascript" "${BUCKET_PATH}/Visualization.js" || true
-          gsutil -m setmeta -h "Content-Type: text/css" "${BUCKET_PATH}/Visualization.css" || true
-          gsutil -m setmeta -h "Content-Type: application/json" "${BUCKET_PATH}/manifest.json" || true
-          gsutil -m setmeta -h "Content-Type: application/json" "${BUCKET_PATH}/Config.json" || true
-          # Cache (ajustá a gusto; para dev usar no-store)
-          gsutil -m setmeta -r -h "Cache-Control: public, max-age=300" "${BUCKET_PATH}"
-
-      - name: Verify uploaded artifacts
-        run: |
-          BUCKET_PATH=$(cat .bucket_path)
-          echo "Verificando en ${BUCKET_PATH}"
-          for obj in Visualization.js Visualization.css manifest.json Config.json; do
-            gcloud storage objects describe "${BUCKET_PATH#gs://}/$obj" \
-              --format="table(name,contentType,cacheControl,size)" || echo "Falta: $obj"
-          done
+          echo "🚀 Subiendo a $BUCKET_PATH"
+          gsutil -m cp -a public-read -h "Cache-Control:no-store" dist/* "$BUCKET_PATH/"
