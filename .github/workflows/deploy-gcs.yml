@@ -16,14 +16,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- AUTH con WIF (usa tus secrets existentes) ---
+      # --- AUTH con WIF ---
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      - name: Setup gcloud
+      - name: Setup gcloud (with gsutil)
         uses: google-github-actions/setup-gcloud@v2
         with:
           install_components: gsutil
