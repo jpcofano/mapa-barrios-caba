@@ -472,10 +472,8 @@ const _diag = (label, extra = {}) => {
 };
 
 // --- resolución segura del proveedor dscc (módulo → window → null) ---
-const dsccResolved =
-  (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
-  (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
-  null;
+const dsccResolved = (typeof dsccModule !== 'undefined' && typeof dsccModule.subscribeToData === 'function') ? dsccModule :
+   (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc : null;
 
 
     if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
