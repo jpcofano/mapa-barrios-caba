@@ -1,61 +1,54 @@
 // scripts/prepare-version.mjs
 // Uso:
-//   node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025"         (sin version)
-//   node scripts/prepare-version.mjs --prefix="barrios-caba-map" --version="V2025"
+//   node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025"
+//   node scripts/prepare-version.mjs --prefix="barrios-caba-map" --version="v2025"
 
 import fs from 'fs';
 import path from 'path';
-import process from 'process';
 
-function getArg(name) {
-  const arg = process.argv.find(a => a.startsWith(`--${name}=`));
-  return arg ? arg.split('=')[1] : null;
+// --- Leer argumentos ---
+const args = Object.fromEntries(process.argv.slice(2).map(arg => {
+  const [key, val] = arg.replace(/^--/, '').split('=');
+  return [key, val];
+}));
+
+let prefix = args.prefix || 'barrios-caba-map-v2025';
+let version = args.version || '';
+
+// --- Normalizar prefix y version ---
+prefix = prefix.trim();
+version = version.trim();
+
+// Eliminar duplicados de versión en prefix
+if (version && prefix.toLowerCase().endsWith(`-${version.toLowerCase()}`)) {
+  prefix = prefix.slice(0, -(version.length + 1));
 }
 
-let prefix = getArg('prefix') || 'barrios-caba-map';
-let version = getArg('version') || '';
+// Determinar nombre final de carpeta
+const folderName = version
+  ? `${prefix}-${version}`
+  : prefix;
 
-// Limpieza de caracteres invisibles
-prefix = prefix.replace(/\u00A0/g, '').trim();
-version = version.replace(/\u00A0/g, '').trim();
+// --- Generar BUCKET_PATH ---
+const BUCKET_PATH = `gs://mapa-barrios-degcba/${folderName}`;
 
-// Evitar duplicación de version en el prefix
-if (version && prefix.toLowerCase().includes(version.toLowerCase())) {
-  version = ''; // Ya está incluido
-}
-
-const folderName = version ? `${prefix}-${version}` : prefix;
-
-// Paths
-const bucketPath = `gs://mapa-barrios-degcba/${folderName}`;
-const manifestHttps = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/manifest.json`;
-
-// Leer manifest base
+// --- Actualizar manifest.json ---
 const manifestPath = path.resolve('public/manifest.json');
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+if (fs.existsSync(manifestPath)) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
-// Actualizar campos
-manifest.packageUrl = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/`;
-manifest.components.forEach(c => {
-  // Limpiar id
-  c.id = c.id.replace(/\u00A0/g, '').trim();
-  // Rutas GS coherentes
-  c.resource.js = `${bucketPath}/Visualization.js`;
-  c.resource.css = `${bucketPath}/Visualization.css`;
-  if (c.resource.config) {
-    c.resource.config = `${bucketPath}/Config.json`;
+  manifest.packageUrl = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/`;
+  if (manifest.components && manifest.components.length > 0) {
+    manifest.components[0].resource.js = `${BUCKET_PATH}/Visualization.js`;
+    manifest.components[0].resource.config = `${BUCKET_PATH}/Config.json`;
+    manifest.components[0].resource.css = `${BUCKET_PATH}/Visualization.css`;
   }
-});
 
-// Guardar manifest actualizado
-fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  console.log(`[prepare-version] Manifest actualizado para carpeta: ${folderName}`);
+}
 
-// Guardar bucket path
-fs.writeFileSync('.bucket_path', bucketPath);
-
-// Logs
-console.log(`[prepare-version] ✅ OK -> ${folderName}`);
-console.log(`[prepare-version] packageUrl: ${manifest.packageUrl}`);
-console.log(`[prepare-version] BUCKET_PATH: ${bucketPath}`);
-console.log(`[prepare-version] MANIFEST (GS): ${bucketPath}/manifest.json`);
-console.log(`[prepare-version] Copiá y pegá en Studio: ${bucketPath}/manifest.json`);
+// --- Guardar BUCKET_PATH en .bucket_path ---
+fs.writeFileSync('.bucket_path', BUCKET_PATH);
+console.log(`[prepare-version] BUCKET_PATH: ${BUCKET_PATH}`);
+console.log(`[prepare-version] Copiá en Studio: ${BUCKET_PATH}/manifest.json`);
