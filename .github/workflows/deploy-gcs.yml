@@ -1,43 +1,22 @@
-name: Deploy to Google Cloud Storage
+name: Deploy GCS
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a usar (ej. V2025)"
+        required: true
+        default: "V2025"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm ci
-
-      # 🔹 Paso 1: preparar versión limpia
-      - name: Prepare manifest version
-        run: node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025" --version="$(date +%Y%m%d)"
-
-      # 🔹 Paso 2: limpieza adicional de NBSP y espacios raros
-      - name: Extra clean manifest.json
-        run: |
-          echo "🔍 Revisando manifest.json..."
-          cat -v public/manifest.json
-          sed -i 's/\xC2\xA0/ /g' public/manifest.json
-          sed -i 's/"id": *"\([^"]*\)"/"id": "\1"/g' public/manifest.json
-          echo "✅ Manifest limpio:"
-          cat -v public/manifest.json
-
-      # 🔹 Paso 3: build del proyecto
-      - name: Build project
-        run: npm run build
-
-      # 🔹 Paso 4: auth GCP
+      # --- AUTH con WIF (usa tus secrets existentes) ---
       - name: Auth to Google Cloud (WIF)
         uses: google-github-actions/auth@v2
         with:
@@ -49,9 +28,55 @@ jobs:
         with:
           install_components: gsutil
 
-      # 🔹 Paso 5: deploy a GCS
-      - name: Deploy to GCS
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare manifest version
+        run: |
+          node scripts/prepare-version.mjs \
+            --prefix="barrios-caba-map-${{ github.event.inputs.version }}" \
+            --version="${{ github.event.inputs.version }}"
+
+      - name: Clean manifest.json (NBSP & spaces)
+        run: |
+          echo "🔍 Revisando manifest.json..."
+          cat -v public/manifest.json || true
+
+          # Reemplazar NBSP (0xA0) por espacio normal
+          sed -i 's/\xC2\xA0/ /g' public/manifest.json
+
+          # Quitar espacios extra en IDs
+          sed -i 's/"id": *"\([^"]*\)"/"id": "\1"/g' public/manifest.json
+
+          echo "✅ Manifest limpio:"
+          cat -v public/manifest.json || true
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy JS
         run: |
           BUCKET_PATH=$(cat .bucket_path)
-          echo "🚀 Subiendo a $BUCKET_PATH"
-          gsutil -m cp -a public-read -h "Cache-Control:no-store" dist/* "$BUCKET_PATH/"
+          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
+            && gsutil -h "Content-Type: application/javascript" \
+                      -h "Cache-Control: no-store" \
+                      cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+
+      - name: Deploy CSS
+        run: |
+          BUCKET_PATH=$(cat .bucket_path)
+          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
+            && gsutil -h "Content-Type: text/css" \
+                      -h "Cache-Control: no-store" \
+                      cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+
+      - name: Deploy assets
+        run: |
+          BUCKET_PATH=$(cat .bucket_path)
+          [[ "$BUCKET_PATH" == gs://mapa-barrios-degcba/* ]] \
+            && gsutil -m cp -r public/* "$BUCKET_PATH/"
