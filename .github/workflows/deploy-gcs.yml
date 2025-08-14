@@ -8,6 +8,11 @@ on:
         required: true
         default: "V2025"
 
+permissions:
+  id-token: write
+  contents: read
+
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
