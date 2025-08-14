@@ -1,66 +1,61 @@
 // scripts/prepare-version.mjs
-// Uso: node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025" --version="V2025"
-// Ajusta manifest.json, normaliza ID, evita NBSP y duplicados de versión.
+// Uso:
+//   node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025"         (sin version)
+//   node scripts/prepare-version.mjs --prefix="barrios-caba-map" --version="V2025"
 
 import fs from 'fs';
 import path from 'path';
-import url from 'url';
+import process from 'process';
 
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-
-function sanitize(str) {
-  return str
-    .replace(/\u00A0/g, '')       // elimina NBSP
-    .replace(/\s+/g, '')          // elimina espacios
-    .replace(/-+/g, '-')          // normaliza guiones
-    .trim();
+function getArg(name) {
+  const arg = process.argv.find(a => a.startsWith(`--${name}=`));
+  return arg ? arg.split('=')[1] : null;
 }
 
-function normalizeId(id) {
-  return sanitize(id).toLowerCase();
+let prefix = getArg('prefix') || 'barrios-caba-map';
+let version = getArg('version') || '';
+
+// Limpieza de caracteres invisibles
+prefix = prefix.replace(/\u00A0/g, '').trim();
+version = version.replace(/\u00A0/g, '').trim();
+
+// Evitar duplicación de version en el prefix
+if (version && prefix.toLowerCase().includes(version.toLowerCase())) {
+  version = ''; // Ya está incluido
 }
 
-// Leer args
-const args = process.argv.slice(2).reduce((acc, arg) => {
-  const [key, val] = arg.replace(/^--/, '').split('=');
-  acc[key] = val;
-  return acc;
-}, {});
-
-const prefix = sanitize(args.prefix || 'barrios-caba-map-v2025');
-const version = sanitize(args.version || 'V2025');
-
-// Evitar que se repita versión
-const folderName = prefix.endsWith(version.toLowerCase()) ? prefix : `${prefix}-${version.toLowerCase()}`;
+const folderName = version ? `${prefix}-${version}` : prefix;
 
 // Paths
-const manifestPath = path.join(__dirname, '../public/manifest.json');
+const bucketPath = `gs://mapa-barrios-degcba/${folderName}`;
+const manifestHttps = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/manifest.json`;
 
-// Cargar manifest
+// Leer manifest base
+const manifestPath = path.resolve('public/manifest.json');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
 // Actualizar campos
-manifest.version = version;
-manifest.devMode = false; // para producción
-if (manifest.packageUrl) {
-  manifest.packageUrl = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/`;
-}
+manifest.packageUrl = `https://storage.googleapis.com/mapa-barrios-degcba/${folderName}/`;
+manifest.components.forEach(c => {
+  // Limpiar id
+  c.id = c.id.replace(/\u00A0/g, '').trim();
+  // Rutas GS coherentes
+  c.resource.js = `${bucketPath}/Visualization.js`;
+  c.resource.css = `${bucketPath}/Visualization.css`;
+  if (c.resource.config) {
+    c.resource.config = `${bucketPath}/Config.json`;
+  }
+});
 
-if (Array.isArray(manifest.components)) {
-  manifest.components.forEach(c => {
-    // normaliza id
-    c.id = normalizeId(`${c.id.split(/barrios?/i)[0]}${prefix}${version}`); 
-    // resources
-    if (c.resource) {
-      for (const key of Object.keys(c.resource)) {
-        c.resource[key] = `gs://mapa-barrios-degcba/${folderName}/${path.basename(c.resource[key])}`;
-      }
-    }
-  });
-}
+// Guardar manifest actualizado
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
 
-// Guardar manifest
-fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-console.log(`[prepare-version] ✅ Manifest actualizado: ${manifestPath}`);
-console.log(`[prepare-version] Carpeta destino: ${folderName}`);
-console.log(`[prepare-version] Agregá en Studio desde: gs://mapa-barrios-degcba/${folderName}/manifest.json`);
+// Guardar bucket path
+fs.writeFileSync('.bucket_path', bucketPath);
+
+// Logs
+console.log(`[prepare-version] ✅ OK -> ${folderName}`);
+console.log(`[prepare-version] packageUrl: ${manifest.packageUrl}`);
+console.log(`[prepare-version] BUCKET_PATH: ${bucketPath}`);
+console.log(`[prepare-version] MANIFEST (GS): ${bucketPath}/manifest.json`);
+console.log(`[prepare-version] Copiá y pegá en Studio: ${bucketPath}/manifest.json`);
