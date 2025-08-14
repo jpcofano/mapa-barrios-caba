@@ -1,5 +1,22 @@
 // NUEVO: trae la API desde el paquete
 import * as dscc from '@google/dscc';
+const ensureDsccScript = (() => {
+  let injected = false;
+  return () => {
+    if (typeof window === 'undefined') return false;
+    if (typeof window.dscc?.subscribeToData === 'function') return true;
+    if (injected) return false;
+    const s = document.createElement('script');
+    s.id = '__dscc_script';
+    s.src = 'https://www.gstatic.com/looker-studio/js/dscc.min.js';
+    s.async = true;
+    s.onload = () => console.log('[Viz] dscc.min.js cargado');
+    document.head.appendChild(s);
+    injected = true;
+    return false;
+  };
+})();
+
 (function(){
   // --- Sanitizador de NBSP / espacios en vizId, js, css ---
   try {
@@ -484,6 +501,7 @@ const dsccResolved =
     // Si todavía no hay dscc, reintenta hasta MAX_ATTEMPTS
     if (attempt < MAX_ATTEMPTS) {
       console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
+      ensureDsccScript();
       setTimeout(() => initWrapper(attempt + 1), 1000);
       return;
     }
