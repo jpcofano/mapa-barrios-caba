@@ -1,5 +1,10 @@
 // NUEVO: trae la API desde el paquete
+// Bundlea la lib de DSCC en tu Visualization.js
 import * as dscc from '@google/dscc';
+
+// Alias estable: garantiza que el símbolo exista en el bundle y podamos referenciarlo con seguridad
+const dsccModule = dscc;
+
 const ensureDsccScript = (() => {
   let injected = false;
   return () => {
@@ -439,7 +444,7 @@ function fmt(n) {
     return el;
   }
 
- function initWrapper(attempt = 1) {
+function initWrapper(attempt = 1) {
   try {
     const MAX_ATTEMPTS = 5;
 
@@ -449,36 +454,43 @@ function fmt(n) {
       console.warn('[Viz] No en iframe – dscc del host no se inyectará. Usá un informe real o mock.');
     }
 
-// --- diagnóstico seguro (no rompe si no existe dsccModule) ---
-const dsccModuleExists = (typeof dsccModule !== 'undefined') && !!dsccModule;
-const dsccModuleSubType = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.subscribeToData : 'undefined';
-const dsccModuleObjType = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.objectTransform  : 'undefined';
+    // --- diagnóstico seguro (no rompe si no existe dsccModule) ---
+    const dsccModuleExists   = (typeof dsccModule !== 'undefined') && !!dsccModule;
+    const dsccModuleSubType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.subscribeToData : 'undefined';
+    const dsccModuleObjType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.objectTransform  : 'undefined';
 
-const _diag = (label, extra = {}) => {
-  console.log(`[Diag ${label}]`, {
-    time: new Date().toISOString(),
-    dsccWindowExists: !!window.dscc,
-    dsccWindowType: typeof window.dscc,
-    dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
-    dsccWindowObjectTransform: typeof window.dscc?.objectTransform,
-    dsccModuleExists,
-    dsccModuleSubscribeType: dsccModuleSubType,
-    dsccModuleObjectTransform: dsccModuleObjType,
-    locationHref: location.href,
-    referrer: document.referrer,
-    attempt,
-    ...extra
-  });
-};
+    const _diag = (label, extra = {}) => {
+      console.log(`[Diag ${label}]`, {
+        time: new Date().toISOString(),
+        dsccWindowExists: !!window.dscc,
+        dsccWindowType: typeof window.dscc,
+        dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
+        dsccWindowObjectTransform: typeof window.dscc?.objectTransform,
+        dsccModuleExists,
+        dsccModuleSubscribeType: dsccModuleSubType,
+        dsccModuleObjectTransform: dsccModuleObjType,
+        locationHref: location.href,
+        referrer: document.referrer,
+        attempt,
+        ...extra   // ⬅️ importante: spread correcto (antes había `.extra`)
+      });
+    };
 
-// --- resolución segura del proveedor dscc (módulo → window → null) ---
-const dsccResolved = (typeof dsccModule !== 'undefined' && typeof dsccModule.subscribeToData === 'function') ? dsccModule :
-   (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc : null;
+    _diag(`attempt-${attempt}`);
 
+    // --- resolución segura del proveedor dscc (módulo → window → null) ---
+    const dsccResolved =
+      (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
+      (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
+      null;
 
     if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
+      const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
+                 : (dsccResolved === window.dscc) ? 'window'
+                 : 'unknown';
+
       console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
-        dsccFrom: dsccResolved === dsccModule ? 'module' : 'window',
+        dsccFrom: from,
         hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
       });
 
@@ -496,10 +508,14 @@ const dsccResolved = (typeof dsccModule !== 'undefined' && typeof dsccModule.sub
       return; // listo: estamos suscriptos
     }
 
-    // Si todavía no hay dscc, reintenta hasta MAX_ATTEMPTS
+    // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
+    ensureDsccScript();
+
     if (attempt < MAX_ATTEMPTS) {
-      console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`);
-      ensureDsccScript();
+      console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`, {
+        dsccModuleSubscribe: dsccModuleSubType,
+        dsccWindowSubscribe: typeof window.dscc?.subscribeToData
+      });
       setTimeout(() => initWrapper(attempt + 1), 1000);
       return;
     }
@@ -520,7 +536,6 @@ const dsccResolved = (typeof dsccModule !== 'undefined' && typeof dsccModule.sub
         </ul>
       </div>`;
 
-    // Datos mock para pruebas locales/fallback
     const mockData = {
       tables: {
         DEFAULT: {
@@ -543,19 +558,13 @@ const dsccResolved = (typeof dsccModule !== 'undefined' && typeof dsccModule.sub
   }
 }
 
-// boot strap
+// Boot strap
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
-    try {
-      console.log('[Viz] DOMContentLoaded → initWrapper()');
-      initWrapper();
-    } catch (e) { console.error(e); }
+    try { console.log('[Viz] DOMContentLoaded → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
   });
 } else {
-  try {
-    console.log('[Viz] DOM listo → initWrapper()');
-    initWrapper();
-  } catch (e) { console.error(e); }
+  try { console.log('[Viz] DOM listo → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
 }
 
 })();
