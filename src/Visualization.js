@@ -486,27 +486,28 @@ function initWrapper(attempt = 1) {
 
     if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
       const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
-                 : (dsccResolved === window.dscc) ? 'window'
-                 : 'unknown';
+                : (dsccResolved === window.dscc) ? 'window'
+                : 'unknown';
 
       console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
         dsccFrom: from,
-        hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
+        subscribeType: typeof dsccResolved.subscribeToData,
+        hasTableTransform: typeof dsccResolved.tableTransform === 'function'  // ← antes decía objectTransform
       });
 
       dsccResolved.subscribeToData((data) => {
         try {
-          console.group('[Viz] Datos con objectTransform');
+          console.group('[Viz] Datos con tableTransform');                    // ← cambia el label
           console.log('[Viz] data:', JSON.stringify(data, null, 2));
           drawVisualization(ensureContainer(), data);
           console.groupEnd();
         } catch (err) {
           console.error('[Viz] Error procesando datos:', err);
         }
-      }, { transform: dsccResolved.objectTransform });
-
-      return; // listo: estamos suscriptos
+      }, { transform: dsccResolved.tableTransform });                          // ← usar tableTransform
+      return;
     }
+
 
     // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
     ensureDsccScript();
