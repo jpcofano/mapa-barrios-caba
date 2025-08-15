@@ -11,6 +11,9 @@ const ensureDsccScript = (() => {
     if (typeof window === 'undefined') return false;
     if (typeof window.dscc?.subscribeToData === 'function') return true;
     if (injected) return false;
+    // Evita reinyecciones si ya existe el script en el DOM
+    const existing = document.getElementById('__dscc_script');
+    if (existing) { injected = true; return false; }
     const s = document.createElement('script');
     s.id = '__dscc_script';
     s.src = 'https://www.gstatic.com/looker-studio/js/dscc.min.js';
@@ -501,6 +504,10 @@ export default function drawVisualization(container, message = {}) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
       const div = L.DomUtil.create('div', 'legend');
+      // No bloquear el mapa al interactuar con la leyenda
+      try {
+      L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div);
+      } catch {}
       Object.assign(div.style, {
         background: 'rgba(255,255,255,.9)',
         padding: '8px 10px',
