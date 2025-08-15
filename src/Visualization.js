@@ -232,12 +232,74 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
 
 // ---------------------- Datos: mapear dimensión → métrica ----------------------
 function buildValueMap(message) {
-  const fbc = message?.fieldsByConfigId || {};
+  // --- Fallbacks de normalización (si no existen globales) ---
+  const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
+  const normalizeKeyLocal = (s) =>
+    String(s ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')   // quita tildes
+      .replace(UWS_RE, ' ')              // NBSP/zero-width → espacio
+      .replace(/\s+/g, ' ')              // colapsa
+      .trim()
+      .toLowerCase();
+
+  const normalizeKey =
+    (typeof window !== 'undefined' && typeof window.normalizeKey === 'function')
+      ? window.normalizeKey
+      : normalizeKeyLocal;
+
+  const normalizeKeyFuzzy =
+    (typeof window !== 'undefined' && typeof window.normalizeKeyFuzzy === 'function')
+      ? window.normalizeKeyFuzzy
+      : (raw) => {
+          const base = normalizeKey(raw);
+          const noSpace = base.replace(/\s+/g, '');
+          const alnum  = base.replace(/[^a-z0-9]/g, '');
+          return Array.from(new Set([base, noSpace, alnum]));
+        };
+
+  // --- Soporte objectTransform → forma "tabla" si hace falta ---
+  const toTableLike = (msg) => {
+    const isObject = Array.isArray(msg?.tables?.DEFAULT);
+    if (!isObject) return msg; // ya es tableTransform o "tabla-like"
+
+    const byId = msg?.fieldsByConfigId || msg?.fields || {};
+    const dims = byId.geoDimension || byId.dimensions || [];
+    const mets = byId.metricPrimary || byId.metrics || [];
+
+    const headers = [...dims, ...mets].map(f => ({
+      id: f.id || f.name,
+      name: f.name || f.id
+    }));
+
+    const rowsObj = Array.isArray(msg?.tables?.DEFAULT) ? msg.tables.DEFAULT : [];
+    const rows = rowsObj.map(rowObj =>
+      headers.map(h => {
+        const v = rowObj?.[h.id];
+        return Array.isArray(v) ? v[0] : v;
+      })
+    );
+
+    return {
+      ...msg,
+      fields: { dimensions: dims, metrics: mets },
+      tables: { DEFAULT: { headers, rows } }
+    };
+  };
+
+  const data = toTableLike(message);
+
+  const fbc = data?.fieldsByConfigId || {};
   const modernDim = Array.isArray(fbc?.geoDimension) ? fbc.geoDimension[0] : null;
   const modernMet = Array.isArray(fbc?.metricPrimary) ? fbc.metricPrimary[0] : null;
-  const table = message?.tables?.DEFAULT || {};
-  const fieldIds = Array.isArray(table.fields) ? table.fields : (Array.isArray(table.headers) ? table.headers : []);
-  const rows = Array.isArray(table.rows) ? table.rows : (Array.isArray(table.data) ? table.data : []);
+
+  const table = data?.tables?.DEFAULT || {};
+  const fieldIds = Array.isArray(table.fields)
+    ? table.fields
+    : (Array.isArray(table.headers) ? table.headers : []);
+  const rows = Array.isArray(table.rows)
+    ? table.rows
+    : (Array.isArray(table.data) ? table.data : []);
 
   // Debug
   console.log('[Viz] table keys:', Object.keys(table));
@@ -248,6 +310,7 @@ function buildValueMap(message) {
   let idxDim = -1, idxMet = -1;
   let keyFieldId, valFieldId;
 
+  // Intento 1: usar mapeo moderno geoDimension/metricPrimary
   if (modernDim && modernMet) {
     keyFieldId = modernDim.id || modernDim.name;
     valFieldId = modernMet.id || modernMet.name;
@@ -258,18 +321,22 @@ function buildValueMap(message) {
     });
   }
 
+  // Intento 2: heurística por nombre
   if (idxDim < 0 || idxMet < 0) {
-    idxDim = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(f?.name || f?.id || ''));
-    idxMet = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(f?.name || f?.id || ''));
+    const pick = (x) => (x?.name || x?.id || '');
+    if (idxDim < 0) idxDim = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(pick(f)));
+    if (idxMet < 0) idxMet = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(pick(f)));
   }
 
+  // Intento 3: primera col numérica (distinta de la dimensión)
   if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
     const isNumericCol = (colIdx) => {
       let hits = 0, seen = 0;
       for (let r = 0; r < sampleN; r++) {
         const row = rows[r];
-        const cell = Array.isArray(row) ? row[colIdx] : row[fieldIds[colIdx]?.id || fieldIds[colIdx]?.name];
+        const keyId = fieldIds[colIdx]?.id || fieldIds[colIdx]?.name;
+        const cell = Array.isArray(row) ? row[colIdx] : row[keyId];
         const n = Number(cell?.v ?? cell?.value ?? cell);
         if (!Number.isNaN(n)) hits++;
         seen++;
@@ -292,15 +359,26 @@ function buildValueMap(message) {
   const map = new Map();
   const values = [];
 
+  // AGGREGATE_MODE: 'last' (por defecto) o 'sum'
+  const AGGREGATE_MODE = 'last';
+
   for (const row of rows) {
     const d = Array.isArray(row) ? row[idxDim] : row[keyFieldId];
     const m = Array.isArray(row) ? row[idxMet] : row[valFieldId];
+
     const keyRaw = (d?.v ?? d?.value ?? d ?? '').toString();
-    const key = normalizeKey(keyRaw); // limpieza fuerte
+    const keyClean = normalizeKey(keyRaw);         // limpieza fuerte base
     const val = Number(m?.v ?? m?.value ?? m);
 
-    if (key && Number.isFinite(val)) {
-      for (const k of normalizeKeyFuzzy(key)) map.set(k, val);
+    if (keyClean && Number.isFinite(val)) {
+      // Setear para variantes (base / sin espacios / alfanum)
+      for (const k of normalizeKeyFuzzy(keyClean)) {
+        if (AGGREGATE_MODE === 'sum' && map.has(k)) {
+          map.set(k, map.get(k) + val);
+        } else {
+          map.set(k, val);
+        }
+      }
       values.push(val);
     }
   }
@@ -314,10 +392,14 @@ function buildValueMap(message) {
 }
 
 // ---------------------- Render principal ----------------------
+// Estado único por módulo para evitar recrear el mapa y provocar
+// "Map container is already initialized."
+const __leafletState = { map: null, layer: null, legend: null };
+
 export default function drawVisualization(container, message = {}) {
-  // --- helpers internos: normalización y compat de shapes ---
+  // --- helpers locales para matching robusto (fallback) ---
   const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
-  const cleanString = (s) =>
+  const cleanStringFallback = (s) =>
     String(s ?? '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')   // quita tildes
@@ -325,76 +407,51 @@ export default function drawVisualization(container, message = {}) {
       .replace(/\s+/g, ' ')              // colapsa
       .trim()
       .toLowerCase();
+  const fuzzy =
+    (typeof normalizeKeyFuzzy === 'function')
+      ? normalizeKeyFuzzy
+      : (raw) => {
+          const base = cleanStringFallback(raw);
+          const noSpace = base.replace(/\s+/g, '');
+          const alnum  = base.replace(/[^a-z0-9]/g, '');
+          return Array.from(new Set([base, noSpace, alnum]));
+        };
 
-  const localNormalizeKeyFuzzy = (raw) => {
-    const base = cleanString(raw);
-    const noSpace = base.replace(/\s+/g, '');
-    const alnum  = base.replace(/[^a-z0-9]/g, '');
-    // devolvemos variantes más comunes de búsqueda
-    return Array.from(new Set([base, noSpace, alnum]));
-  };
-
-  // Usa la global si existe; si no, la local
-  const fuzzy = (typeof normalizeKeyFuzzy === 'function')
-    ? normalizeKeyFuzzy
-    : localNormalizeKeyFuzzy;
-
-  // Convierte objectTransform -> forma "tabla" (headers/rows) compatible
-  const objectToTableShape = (data) => {
-    const byId = data?.fieldsByConfigId || data?.fields || {};
-    const dims = byId.geoDimension || byId.dimensions || [];
-    const mets = byId.metricPrimary || byId.metrics || [];
-
-    const headers = [...dims, ...mets].map(f => ({
-      id: f.id || f.name,
-      name: f.name || f.id
-    }));
-
-    const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
-    const rows = rowsObj.map(rowObj =>
-      headers.map(h => {
-        const v = rowObj?.[h.id];
-        return Array.isArray(v) ? v[0] : v;
-      })
-    );
-
-    // Devolvemos un "message" compatible con tableTransform
-    return {
-      ...data,
-      fields: { dimensions: dims, metrics: mets },
-      tables: { DEFAULT: { headers, rows } }
-    };
-  };
-
-  // Detecta si viene en objectTransform y normaliza
-  const isObjectTransform = Array.isArray(message?.tables?.DEFAULT);
-  const msg = isObjectTransform ? objectToTableShape(message) : message;
-
-  // ---- preparación del contenedor/mapa ----
-  container.innerHTML = '';
+  // --- container: no lo vaciamos si ya hay mapa; solo garantizamos tamaño ---
   container.style.width = '100%';
   container.style.height = '100%';
 
-  // Evita "Map container is already initialized."
-  if (container.__leafletMap) {
-    try { container.__leafletMap.remove(); } catch {}
-    container.__leafletMap = null;
-  }
-
   // ---- estilo + datos ----
-  const style = readStyle(msg);                          // tu helper
-  const nivel = style.nivelJerarquia || 'barrio';
-
-  // buildValueMap espera formato table-like (headers/rows)
-  const stats = buildValueMap(msg);                      // tu helper (usa msg normalizado)
+  const style  = readStyle(message);                         // helper del proyecto
+  const nivel  = style.nivelJerarquia || 'barrio';
+  const stats  = buildValueMap(message);                     // espera table-like (headers/rows)
   const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
 
-  const map = L.map(container, { zoomControl: true, attributionControl: true });
-  container.__leafletMap = map;
+  // ---- mapa: crear una sola vez y reutilizar entre renders ----
+  if (!__leafletState.map) {
+    __leafletState.map = L.map(container, { zoomControl: true, attributionControl: true });
+  } else {
+    // si el contenedor real cambió (pasa en Studio), movemos el DOM del mapa
+    const current = __leafletState.map.getContainer();
+    if (current && current !== container) {
+      container.appendChild(current);
+      setTimeout(() => { try { __leafletState.map.invalidateSize(); } catch {} }, 0);
+    }
+    // limpiar capa/leyenda previas
+    if (__leafletState.layer) {
+      try { __leafletState.map.removeLayer(__leafletState.layer); } catch {}
+      __leafletState.layer = null;
+    }
+    if (__leafletState.legend) {
+      try { __leafletState.legend.remove(); } catch {}
+      __leafletState.legend = null;
+    }
+  }
+  const map = __leafletState.map;
 
-  // ---- estilo por feature (match robusto) ----
+  // ---- estilo por feature (usa matching robusto) ----
   const styleFn = (feature) => {
-    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty); // tu helper
+    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
     let v;
     if (stats?.map?.size) {
       for (const k of fuzzy(nombreRaw)) {
@@ -410,16 +467,16 @@ export default function drawVisualization(container, message = {}) {
         const idx = Math.max(0, Math.min(n - 1, Math.round(clamp01(t) * (n - 1))));
         fillColor = style.colorPalette.colors[idx];
       } else {
-        fillColor = colorFromScale(style.colorScale, t, style.invertScale); // tu helper
+        fillColor = colorFromScale(style.colorScale, t, style.invertScale);
       }
     } else {
       fillColor = style.colorMissing;
     }
 
     return {
-      color: style.showBorders ? style.borderColor : 'transparent',
-      weight: style.showBorders ? style.borderWidth : 0,
-      opacity: style.showBorders ? style.borderOpacity : 0,
+      color:   style.showBorders ? style.borderColor  : 'transparent',
+      weight:  style.showBorders ? style.borderWidth  : 0,
+      opacity: style.showBorders ? style.borderOpacity: 0,
       fillColor,
       fillOpacity: style.opacity
     };
@@ -428,8 +485,8 @@ export default function drawVisualization(container, message = {}) {
   const layer = L.geoJSON(geojson, {
     style: styleFn,
     onEachFeature: (feature, lyr) => {
-      const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
-      const nombreLabel = String(nombreRaw); // etiqueta “humana”
+      const nombreRaw   = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
+      const nombreLabel = String(nombreRaw); // etiqueta “humana” intacta
 
       if (style.showLabels) {
         lyr.bindTooltip(nombreLabel, { sticky: true, direction: 'center' });
@@ -449,10 +506,12 @@ export default function drawVisualization(container, message = {}) {
       lyr.bindPopup(content, { closeButton: false });
     }
   }).addTo(map);
+  __leafletState.layer = layer;
 
+  // ---- ajuste de vista ----
   try {
     const b = layer.getBounds();
-    if (b && b.isValid && b.isValid()) {
+    if (b?.isValid && b.isValid()) {
       map.fitBounds(b, { padding: [16, 16] });
       setTimeout(() => { try { map.invalidateSize(); } catch {} }, 0);
     } else {
@@ -510,7 +569,7 @@ export default function drawVisualization(container, message = {}) {
         sw.style.background = col;
 
         const label = document.createElement('span');
-        label.textContent = `${fmt(a)} – ${fmt(b)}`; // ← fixed template string
+        label.textContent = `${fmt(a)} – ${fmt(b)}`;
 
         row.appendChild(sw);
         row.appendChild(label);
@@ -519,8 +578,10 @@ export default function drawVisualization(container, message = {}) {
       return div;
     };
     legend.addTo(map);
+    __leafletState.legend = legend;
   }
 }
+
 
 
 function fmt(n) {
@@ -583,71 +644,65 @@ function initWrapper(attempt = 1) {
     _diag(`attempt-${attempt}`);
 
     // --- resolución segura del proveedor dscc (módulo → window → null) ---
-    const dsccResolved =
-      (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
-      (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
-      null;
+const dsccResolved =
+  (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
+  (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
+  null;
 
-    if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
-      const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
-                : (dsccResolved === window.dscc) ? 'window'
-                : 'unknown';
+if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
+  const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
+             : (dsccResolved === window.dscc) ? 'window'
+             : 'unknown';
 
-      console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
-        dsccFrom: from,
-        subscribeType: typeof dsccResolved.subscribeToData,
-        hasTableTransform: typeof dsccResolved.tableTransform === 'function'  // ← antes decía objectTransform
-      });
+  console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
+    dsccFrom: from,
+    subscribeType: typeof dsccResolved.subscribeToData,
+    hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
+  });
 
-    dsccResolved.subscribeToData((data) => {
-      try {
-        console.group('[Viz] Datos con objectTransform');
+  dsccResolved.subscribeToData((data) => {
+    try {
+      console.group('[Viz] Datos con objectTransform');
+      // Guardá una copia por si querés inspeccionar en consola
+      try { window.__lastData = data; } catch {}
 
-        // 1) normalizamos a forma "tabla"
-        const t = objectToTableShape(data);
+      // 1) Normalizá objectTransform -> forma "tabla"
+      const t = objectToTableShape(data);
 
-        // 2) logs equivalentes a los que ya usabas
-        console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
-        console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
-        console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
-        console.log(`Total de filas: ${t.rows.length}`);
-        if (t.rows.length > 0) {
-          const sampleCount = Math.min(t.rows.length, 5);
-          for (let i = 0; i < sampleCount; i++) {
-            const rowObj = {};
-            t.headers.forEach((h, idx) => { rowObj[h.name] = t.rows[i][idx]; });
-            console.log(`Fila ${i + 1}:`, rowObj);
-          }
-        } else {
-          console.warn('[Viz] La tabla normalizada no contiene filas.');
+      // 2) Logs equivalentes a los que ya usabas
+      console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
+      console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
+      console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
+      console.log(`Total de filas: ${t.rows.length}`);
+      if (t.rows.length > 0) {
+        const sampleCount = Math.min(t.rows.length, 5);
+        for (let i = 0; i < sampleCount; i++) {
+          const rowObj = {};
+          t.headers.forEach((h, idx) => { rowObj[h.name] = t.rows[i][idx]; });
+          console.log(`Fila ${i + 1}:`, rowObj);
         }
-        console.groupEnd();
-
-        // 3) armamos un "table-like data" para tu drawVisualization existente
-        const tableLike = {
-          fields: {
-            dimensions: t.dims,
-            metrics: t.mets,
-          },
-          tables: {
-            DEFAULT: {
-              headers: t.headers,
-              rows: t.rows,
-            }
-          }
-        };
-
-        // 4) dibujar usando tu función existente
-        drawVisualization(ensureContainer(), tableLike);
-
-      } catch (err) {
-        console.error('[Viz] Error procesando datos (object→table):', err);
+      } else {
+        console.warn('[Viz] La tabla normalizada no contiene filas.');
       }
-    }, { transform: dsccResolved.objectTransform });
-                        // ← usar tableTransform
-      return;
-    }
 
+      // 3) Armá el "table-like" que consume tu drawVisualization
+      const tableLike = {
+        fields: { dimensions: t.dims, metrics: t.mets },
+        tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
+      };
+      try { window.__lastTableLike = tableLike; } catch {}
+
+      // 4) Dibujar usando tu función existente
+      drawVisualization(ensureContainer(), tableLike);
+
+      console.groupEnd();
+    } catch (err) {
+      console.error('[Viz] Error procesando datos (object→table):', err);
+    }
+  }, { transform: dsccResolved.objectTransform });
+
+  return;
+}
 
     // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
     ensureDsccScript();
