@@ -1,0 +1,65 @@
+--- a/src/Visualization.js
++++ b/src/Visualization.js
+@@ -36,10 +36,11 @@
+ 
+   const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
+   const rows = rowsObj.map(rowObj => {
+-    // cada celda es el primer valor del arreglo que viene en objectTransform
++    // cada celda puede venir como array y/o como objeto {v,f}
+     return headers.map(h => {
+       const v = rowObj?.[h.id];
+-      return Array.isArray(v) ? v[0] : v;
++      const cell = Array.isArray(v) ? v[0] : v;
++      return (cell && typeof cell === 'object') ? (cell.v ?? cell.value ?? cell) : cell;
+     });
+   });
+ 
+@@ -674,7 +675,9 @@
+     // 3) Armá el "table-like" que consume tu drawVisualization
+     const tableLike = {
+       fields: { dimensions: t.dims, metrics: t.mets },
+-      tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
++      tables: { DEFAULT: { headers: t.headers, rows: t.rows } },
++      fieldsByConfigId: data.fieldsByConfigId || {},
++      styleById: data.styleById || {}
+     };
+     try { window.__lastTableLike = tableLike; } catch {}
+ 
+
+ // …(código intermedio sin cambios)…
+
+ dsccResolved.subscribeToData((data) => {
+   try {
+     console.group('[Viz] Datos con objectTransform');
+     try { window.__lastData = data; } catch {}
+
+     // 1) Normalizá objectTransform -> forma "tabla"
+     const t = objectToTableShape(data);
+
+     // 2) Logs / preview… (sin cambios)
+
+-    // 3) Armá el "table-like" que consume tu drawVisualization
+-    const tableLike = {
+-      fields: { dimensions: t.dims, metrics: t.mets },
+-      tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
+-    };
++    // 3) Armá el "table-like" que consume tu drawVisualization
++    //    **Preservando** metadatos de estilo y mapeo por config
++    const tableLike = {
++      fields: { dimensions: t.dims, metrics: t.mets },
++      tables: { DEFAULT: { headers: t.headers, rows: t.rows } },
++      fieldsByConfigId: data.fieldsByConfigId || {},
++      styleById: data.styleById || {}
++    };
+     try { window.__lastTableLike = tableLike; } catch {}
+
+     // 4) Dibujar
+     drawVisualization(ensureContainer(), tableLike);
+
+     console.groupEnd(); // /Datos con objectTransform
+   } catch (err) {
+     console.error('[Viz] Error procesando datos (object→table):', err);
+   }
+ }, { transform: dsccResolved.objectTransform });
+
+ // …(resto del archivo sin cambios)…

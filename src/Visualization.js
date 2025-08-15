@@ -34,14 +34,17 @@ function objectToTableShape(data) {
     name: f.name || f.id
   }));
 
+// dentro de objectToTableShape
   const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
-  const rows = rowsObj.map(rowObj => {
-    // cada celda es el primer valor del arreglo que viene en objectTransform
-    return headers.map(h => {
+  const rows = rowsObj.map(rowObj =>
+    headers.map(h => {
       const v = rowObj?.[h.id];
-      return Array.isArray(v) ? v[0] : v;
-    });
-  });
+      const cell = Array.isArray(v) ? v[0] : v;
+      return (cell && typeof cell === 'object') ? (cell.v ?? cell.value ?? cell) : cell;
+    })
+  );
+
+
 
   return { dims, mets, headers, rows };
 }
@@ -671,15 +674,17 @@ dsccResolved.subscribeToData((data) => {
     }
     console.groupEnd(); // /Preview
 
-    // 3) Armá el "table-like" que consume tu drawVisualization
-    const tableLike = {
-      fields: { dimensions: t.dims, metrics: t.mets },
-      tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
-    };
-    try { window.__lastTableLike = tableLike; } catch {}
+  // 3) Armá el "table-like" que consume tu drawVisualization
+  const tableLike = {
+    fields: { dimensions: t.dims, metrics: t.mets },
+    tables: { DEFAULT: { headers: t.headers, rows: t.rows } },
+    fieldsByConfigId: data.fieldsByConfigId || {},
+    styleById: data.styleById || {}
+  };
+  try { window.__lastTableLike = tableLike; } catch {}
 
-    // 4) Dibujar usando tu función existente
-    drawVisualization(ensureContainer(), tableLike);
+  drawVisualization(ensureContainer(), tableLike);
+
 
     console.groupEnd(); // /Datos con objectTransform
   } catch (err) {
