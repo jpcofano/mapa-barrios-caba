@@ -83,17 +83,26 @@ jobs:
         run: echo "BUCKET_PATH=$(cat .bucket_path)" >> $GITHUB_ENV
 
       # Auth GCP por OIDC (usar Workload Identity Federation)
-      - name: Auth to Google Cloud (OIDC)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+      # - name: Auth to Google Cloud (OIDC)
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      #     service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      - name: Setup gcloud
-        uses: google-github-actions/setup-gcloud@v2
+      # - name: Setup gcloud
+      #   uses: google-github-actions/setup-gcloud@v2
+      #   with:
+      #     project_id: ${{ secrets.GCP_PROJECT_ID }}
+      #     install_components: gsutil
+
+      - uses: google-github-actions/auth@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          install_components: gsutil
+          workload_identity_provider: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/<TU-PROVIDER>
+          service_account: ci-deploy@mimetic-union-469017-f3.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: mimetic-union-469017-f3
 
       - name: Deploy to GCS
         run: |
