@@ -23,7 +23,7 @@ permissions:
 env:
   # GCP
   GCP_PROJECT_ID: mimetic-union-469017-f3
-  GCP_WIF_PROVIDER: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  GCP_WIF_PROVIDER: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/github
   GCP_SERVICE_ACCOUNT: ci-deploy@mimetic-union-469017-f3.iam.gserviceaccount.com
   GCS_BUCKET: mapa-barrios-degcba
 
