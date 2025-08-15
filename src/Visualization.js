@@ -229,155 +229,126 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
   const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
   return anyStr ?? '—';
 }
+// --- helpers numéricos robustos ---
+function toNumberLoose(x) {
+  if (typeof x === 'number') return x;
+  const cand = x?.v ?? x?.value ?? x;
+  if (typeof cand === 'number') return cand;
+  let s = String(cand ?? '').replace(/\s|\u00A0/g, '').trim();
+  if (!s) return NaN;
+  // 1.234,56 -> 1234.56
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  // 1,234.56 -> 1234.56
+  else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, '');
+  else s = s.replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// Normaliza a "tabla": headers = [{id,name}], rows = Array<Array<any>>
+function normalizeTable(defaultTable, fields = {}) {
+  let headers = Array.isArray(defaultTable.headers)
+    ? defaultTable.headers
+    : (Array.isArray(defaultTable.fields) ? defaultTable.fields : []);
+  let rows = Array.isArray(defaultTable.rows) ? defaultTable.rows : [];
+
+  // Si no hay headers pero rows son objetos, derivar headers de las keys
+  if ((!headers || !headers.length) && rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
+    const keys = Object.keys(rows[0]);
+    headers = keys.map(k => ({ id: k, name: k }));
+  }
+
+  // Si rows son objetos, convertirlos a arrays en el orden de headers
+  if (rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
+    rows = rows.map(obj =>
+      headers.map(h => obj[h.id] ?? obj[h.name] ?? null)
+    );
+  }
+
+  // Etiquetas legibles para el log (si headers vienen con id opacos)
+  const prettyHeaders = headers.map(h => ({
+    id: h.id ?? h.name,
+    name: fields.dimensions?.find(d => d.id === h.id)?.name ||
+          fields.metrics?.find(m => m.id === h.id)?.name ||
+          h.name || h.id
+  }));
+
+  return { headers: prettyHeaders, rows };
+}
 
 // ---------------------- Datos: mapear dimensión → métrica ----------------------
 function buildValueMap(message) {
-  // --- Fallbacks de normalización (si no existen globales) ---
-  const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
-  const normalizeKeyLocal = (s) =>
-    String(s ?? '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')   // quita tildes
-      .replace(UWS_RE, ' ')              // NBSP/zero-width → espacio
-      .replace(/\s+/g, ' ')              // colapsa
-      .trim()
-      .toLowerCase();
+  const fbc = message?.fieldsByConfigId || {};
+  const fields = message?.fields || {};
+  const tableRaw = message?.tables?.DEFAULT || {};
+  const { headers, rows } = normalizeTable(tableRaw, fields);
 
-  const normalizeKey =
-    (typeof window !== 'undefined' && typeof window.normalizeKey === 'function')
-      ? window.normalizeKey
-      : normalizeKeyLocal;
-
-  const normalizeKeyFuzzy =
-    (typeof window !== 'undefined' && typeof window.normalizeKeyFuzzy === 'function')
-      ? window.normalizeKeyFuzzy
-      : (raw) => {
-          const base = normalizeKey(raw);
-          const noSpace = base.replace(/\s+/g, '');
-          const alnum  = base.replace(/[^a-z0-9]/g, '');
-          return Array.from(new Set([base, noSpace, alnum]));
-        };
-
-  // --- Soporte objectTransform → forma "tabla" si hace falta ---
-  const toTableLike = (msg) => {
-    const isObject = Array.isArray(msg?.tables?.DEFAULT);
-    if (!isObject) return msg; // ya es tableTransform o "tabla-like"
-
-    const byId = msg?.fieldsByConfigId || msg?.fields || {};
-    const dims = byId.geoDimension || byId.dimensions || [];
-    const mets = byId.metricPrimary || byId.metrics || [];
-
-    const headers = [...dims, ...mets].map(f => ({
-      id: f.id || f.name,
-      name: f.name || f.id
-    }));
-
-    const rowsObj = Array.isArray(msg?.tables?.DEFAULT) ? msg.tables.DEFAULT : [];
-    const rows = rowsObj.map(rowObj =>
-      headers.map(h => {
-        const v = rowObj?.[h.id];
-        return Array.isArray(v) ? v[0] : v;
-      })
-    );
-
-    return {
-      ...msg,
-      fields: { dimensions: dims, metrics: mets },
-      tables: { DEFAULT: { headers, rows } }
-    };
-  };
-
-  const data = toTableLike(message);
-
-  const fbc = data?.fieldsByConfigId || {};
-  const modernDim = Array.isArray(fbc?.geoDimension) ? fbc.geoDimension[0] : null;
-  const modernMet = Array.isArray(fbc?.metricPrimary) ? fbc.metricPrimary[0] : null;
-
-  const table = data?.tables?.DEFAULT || {};
-  const fieldIds = Array.isArray(table.fields)
-    ? table.fields
-    : (Array.isArray(table.headers) ? table.headers : []);
-  const rows = Array.isArray(table.rows)
-    ? table.rows
-    : (Array.isArray(table.data) ? table.data : []);
-
-  // Debug
-  console.log('[Viz] table keys:', Object.keys(table));
-  console.log('[Viz] fields/headers:', fieldIds.map(f => f?.id || f?.name));
+  console.log('[Viz] table keys:', Object.keys(tableRaw));
+  console.log('[Viz] fields/headers:', headers.map(f => f?.id || f?.name));
   console.log('[Viz] rows.length:', rows.length);
   console.log('[Viz] fieldsByConfigId:', Object.keys(fbc));
 
+  // 1) Ubicar índices de dimensión y métrica
   let idxDim = -1, idxMet = -1;
-  let keyFieldId, valFieldId;
 
-  // Intento 1: usar mapeo moderno geoDimension/metricPrimary
-  if (modernDim && modernMet) {
-    keyFieldId = modernDim.id || modernDim.name;
-    valFieldId = modernMet.id || modernMet.name;
-    fieldIds.forEach((f, i) => {
-      const nm = (f?.id || f?.name || '').toString().toLowerCase();
-      if ((keyFieldId || '').toLowerCase() === nm) idxDim = i;
-      if ((valFieldId || '').toLowerCase() === nm) idxMet = i;
-    });
+  // Preferimos lo que venga configurado por Config.json
+  const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
+  const metIdPref = fbc.metricPrimary?.[0]?.id || fbc.metricPrimary?.[0]?.name;
+  if (dimIdPref) idxDim = headers.findIndex(h => (h.id || h.name) === dimIdPref);
+  if (metIdPref) idxMet = headers.findIndex(h => (h.id || h.name) === metIdPref);
+
+  // Fallback: usar fields.dimensions / fields.metrics
+  if (idxDim < 0 && Array.isArray(fields.dimensions) && fields.dimensions.length) {
+    const wanted = (fields.dimensions[0].id || fields.dimensions[0].name || '').toString();
+    idxDim = headers.findIndex(h => (h.id || h.name) === wanted);
+  }
+  if (idxMet < 0 && Array.isArray(fields.metrics) && fields.metrics.length) {
+    const wanted = (fields.metrics[0].id || fields.metrics[0].name || '').toString();
+    idxMet = headers.findIndex(h => (h.id || h.name) === wanted);
   }
 
-  // Intento 2: heurística por nombre
-  if (idxDim < 0 || idxMet < 0) {
-    const pick = (x) => (x?.name || x?.id || '');
-    if (idxDim < 0) idxDim = fieldIds.findIndex(f => /barrio|comuna|nombre|texto|name/i.test(pick(f)));
-    if (idxMet < 0) idxMet = fieldIds.findIndex(f => /valor|m(é|e)trica|metric|value|cantidad|total/i.test(pick(f)));
-  }
+  // Heurísticas por nombre (por si no vino nada de lo anterior)
+  if (idxDim < 0)
+    idxDim = headers.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
 
-  // Intento 3: primera col numérica (distinta de la dimensión)
+  // Si todavía no tenemos métrica, detectamos la 1ª columna numérica ≠ dimensión
   if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
-    const isNumericCol = (colIdx) => {
+    outer:
+    for (let j = 0; j < headers.length; j++) {
+      if (j === idxDim) continue;
       let hits = 0, seen = 0;
       for (let r = 0; r < sampleN; r++) {
-        const row = rows[r];
-        const keyId = fieldIds[colIdx]?.id || fieldIds[colIdx]?.name;
-        const cell = Array.isArray(row) ? row[colIdx] : row[keyId];
-        const n = Number(cell?.v ?? cell?.value ?? cell);
-        if (!Number.isNaN(n)) hits++;
+        const n = toNumberLoose(rows[r][j]);
+        if (Number.isFinite(n)) hits++;
         seen++;
       }
-      return seen > 0 && hits / seen >= 0.6;
-    };
-    for (let i = 0; i < fieldIds.length; i++) {
-      if (i !== idxDim && isNumericCol(i)) { idxMet = i; break; }
+      if (seen && hits / seen >= 0.6) { idxMet = j; break outer; }
     }
   }
 
   if (idxDim < 0 || idxMet < 0) {
-    console.warn('[Viz] No se encontraron campos válidos para dimensión/métrica');
+    console.warn('[Viz] No se encontraron campos válidos para dimensión/métrica', { idxDim, idxMet });
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
   }
 
-  keyFieldId = keyFieldId || fieldIds[idxDim]?.id || fieldIds[idxDim]?.name;
-  valFieldId = valFieldId || fieldIds[idxMet]?.id || fieldIds[idxMet]?.name;
-
+  // 2) Construir el mapa normalizado (con tus normalizadores si existen)
   const map = new Map();
   const values = [];
-
-  // AGGREGATE_MODE: 'last' (por defecto) o 'sum'
-  const AGGREGATE_MODE = 'last';
-
   for (const row of rows) {
-    const d = Array.isArray(row) ? row[idxDim] : row[keyFieldId];
-    const m = Array.isArray(row) ? row[idxMet] : row[valFieldId];
+    const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '').toString();
+    if (!keyRaw) continue;
+    // normalización fuerte de texto (acentos, espacios, mayúsc/minúsc)
+    const keyNorm = (typeof normalizeKey === 'function')
+      ? normalizeKey(keyRaw)
+      : keyRaw.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-    const keyRaw = (d?.v ?? d?.value ?? d ?? '').toString();
-    const keyClean = normalizeKey(keyRaw);         // limpieza fuerte base
-    const val = Number(m?.v ?? m?.value ?? m);
-
-    if (keyClean && Number.isFinite(val)) {
-      // Setear para variantes (base / sin espacios / alfanum)
-      for (const k of normalizeKeyFuzzy(keyClean)) {
-        if (AGGREGATE_MODE === 'sum' && map.has(k)) {
-          map.set(k, map.get(k) + val);
-        } else {
-          map.set(k, val);
-        }
+    const val = toNumberLoose(row?.[idxMet]);
+    if (Number.isFinite(val)) {
+      if (typeof normalizeKeyFuzzy === 'function') {
+        for (const k of normalizeKeyFuzzy(keyNorm)) map.set(k, val);
+      } else {
+        map.set(keyNorm, val);
       }
       values.push(val);
     }
@@ -390,6 +361,7 @@ function buildValueMap(message) {
   console.log('[Viz] min/max/count:', min, max, values.length);
   return { map, min, max, count: values.length };
 }
+
 
 // ---------------------- Render principal ----------------------
 // Estado único por módulo para evitar recrear el mapa y provocar
@@ -660,46 +632,60 @@ if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
     hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
   });
 
-  dsccResolved.subscribeToData((data) => {
-    try {
-      console.group('[Viz] Datos con objectTransform');
-      // Guardá una copia por si querés inspeccionar en consola
-      try { window.__lastData = data; } catch {}
+dsccResolved.subscribeToData((data) => {
+  try {
+    console.group('[Viz] Datos con objectTransform');
+    // Copia para inspección en consola
+    try { window.__lastData = data; } catch {}
 
-      // 1) Normalizá objectTransform -> forma "tabla"
-      const t = objectToTableShape(data);
+    // 1) Normalizá objectTransform -> forma "tabla"
+    const t = objectToTableShape(data);
 
-      // 2) Logs equivalentes a los que ya usabas
-      console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
-      console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
-      console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
-      console.log(`Total de filas: ${t.rows.length}`);
-      if (t.rows.length > 0) {
-        const sampleCount = Math.min(t.rows.length, 5);
-        for (let i = 0; i < sampleCount; i++) {
-          const rowObj = {};
-          t.headers.forEach((h, idx) => { rowObj[h.name] = t.rows[i][idx]; });
-          console.log(`Fila ${i + 1}:`, rowObj);
-        }
-      } else {
-        console.warn('[Viz] La tabla normalizada no contiene filas.');
+    // 2) Logs robustos (soporta celdas {v,value} y filas objeto/array)
+    const val = (c) => (c?.v ?? c?.value ?? c);
+    const getCell = (row, h, idx) =>
+      Array.isArray(row) ? row[idx] : (row?.[h.id] ?? row?.[h.name]);
+
+    console.group('[Viz] Preview (tabla normalizada)');
+    console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
+    console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
+    console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
+    console.log(`Total de filas: ${t.rows.length}`);
+
+    if (t.rows.length > 0) {
+      const sampleCount = Math.min(t.rows.length, 5);
+      for (let i = 0; i < sampleCount; i++) {
+        const rowObj = {};
+        t.headers.forEach((h, idx) => {
+          rowObj[h.name] = val(getCell(t.rows[i], h, idx));
+        });
+        console.log(`Fila ${i + 1}:`, rowObj);
       }
-
-      // 3) Armá el "table-like" que consume tu drawVisualization
-      const tableLike = {
-        fields: { dimensions: t.dims, metrics: t.mets },
-        tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
-      };
-      try { window.__lastTableLike = tableLike; } catch {}
-
-      // 4) Dibujar usando tu función existente
-      drawVisualization(ensureContainer(), tableLike);
-
-      console.groupEnd();
-    } catch (err) {
-      console.error('[Viz] Error procesando datos (object→table):', err);
+      // vista compacta
+      const sampleTable = t.rows.slice(0, sampleCount).map(r =>
+        Object.fromEntries(t.headers.map((h, idx) => [h.name, val(getCell(r, h, idx))]))
+      );
+      console.table(sampleTable);
+    } else {
+      console.warn('[Viz] La tabla normalizada no contiene filas.');
     }
-  }, { transform: dsccResolved.objectTransform });
+    console.groupEnd(); // /Preview
+
+    // 3) Armá el "table-like" que consume tu drawVisualization
+    const tableLike = {
+      fields: { dimensions: t.dims, metrics: t.mets },
+      tables: { DEFAULT: { headers: t.headers, rows: t.rows } }
+    };
+    try { window.__lastTableLike = tableLike; } catch {}
+
+    // 4) Dibujar usando tu función existente
+    drawVisualization(ensureContainer(), tableLike);
+
+    console.groupEnd(); // /Datos con objectTransform
+  } catch (err) {
+    console.error('[Viz] Error procesando datos (object→table):', err);
+  }
+}, { transform: dsccResolved.objectTransform });
 
   return;
 }

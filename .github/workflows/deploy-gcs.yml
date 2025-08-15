@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       prefix:
-        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025e)"
+        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025)"
         required: true
-        default: "barrios-caba-map-v2025e"
+        default: "barrios-caba-map-v2025"
       version:
         description: "Sufijo de versión (opcional, ej: e)"
         required: false
@@ -93,15 +93,16 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
+          install_components: gsutil
 
       - name: Deploy to GCS
         run: |
           echo "Deploying to $BUCKET_PATH"
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/javascript" cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/javascript" cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
           if [ -f dist/Visualization.css ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type:text/css" cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+            gsutil -m -h "Cache-Control: no-store" -h "Content-Type: text/css" cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
           fi
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/json" cp public/Config.json "$BUCKET_PATH/Config.json"
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type:application/json" cp public/manifest.json "$BUCKET_PATH/manifest.json"
-          if [ -f public/Icon.png ]; then gsutil -m -h "Cache-Control:no-store" -h "Content-Type:image/png" cp public/Icon.png "$BUCKET_PATH/Icon.png"; fi
-          if [ -f public/Logo.png ]; then gsutil -m -h "Cache-Control:no-store" -h "Content-Type:image/png" cp public/Logo.png "$BUCKET_PATH/Logo.png"; fi
+          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/json" cp public/Config.json "$BUCKET_PATH/Config.json"
+          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/json" cp public/manifest.json "$BUCKET_PATH/manifest.json"
+          if [ -f public/Icon.png ]; then gsutil -m -h "Cache-Control: no-store" -h "Content-Type: image/png" cp public/Icon.png "$BUCKET_PATH/Icon.png"; fi
+          if [ -f public/Logo.png ]; then gsutil -m -h "Cache-Control: no-store" -h "Content-Type: image/png" cp public/Logo.png "$BUCKET_PATH/Logo.png"; fi
