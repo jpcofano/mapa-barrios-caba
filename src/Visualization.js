@@ -22,6 +22,30 @@ const ensureDsccScript = (() => {
   };
 })();
 
+// Convierte objectTransform -> forma tipo tableTransform (headers/rows)
+function objectToTableShape(data) {
+  const byId = data?.fieldsByConfigId || data?.fields || {};
+  const dims = byId.geoDimension || byId.dimensions || [];
+  const mets = byId.metricPrimary || byId.metrics || [];
+
+  // headers: mismo orden dim -> met
+  const headers = [...dims, ...mets].map(f => ({
+    id: f.id || f.name,
+    name: f.name || f.id
+  }));
+
+  const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
+  const rows = rowsObj.map(rowObj => {
+    // cada celda es el primer valor del arreglo que viene en objectTransform
+    return headers.map(h => {
+      const v = rowObj?.[h.id];
+      return Array.isArray(v) ? v[0] : v;
+    });
+  });
+
+  return { dims, mets, headers, rows };
+}
+
 (function(){
   // --- Sanitizador de NBSP / espacios en vizId, js, css ---
   try {
@@ -291,23 +315,93 @@ function buildValueMap(message) {
 
 // ---------------------- Render principal ----------------------
 export default function drawVisualization(container, message = {}) {
+  // --- helpers internos: normalización y compat de shapes ---
+  const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
+  const cleanString = (s) =>
+    String(s ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')   // quita tildes
+      .replace(UWS_RE, ' ')              // NBSP/zero-width -> espacio
+      .replace(/\s+/g, ' ')              // colapsa
+      .trim()
+      .toLowerCase();
+
+  const localNormalizeKeyFuzzy = (raw) => {
+    const base = cleanString(raw);
+    const noSpace = base.replace(/\s+/g, '');
+    const alnum  = base.replace(/[^a-z0-9]/g, '');
+    // devolvemos variantes más comunes de búsqueda
+    return Array.from(new Set([base, noSpace, alnum]));
+  };
+
+  // Usa la global si existe; si no, la local
+  const fuzzy = (typeof normalizeKeyFuzzy === 'function')
+    ? normalizeKeyFuzzy
+    : localNormalizeKeyFuzzy;
+
+  // Convierte objectTransform -> forma "tabla" (headers/rows) compatible
+  const objectToTableShape = (data) => {
+    const byId = data?.fieldsByConfigId || data?.fields || {};
+    const dims = byId.geoDimension || byId.dimensions || [];
+    const mets = byId.metricPrimary || byId.metrics || [];
+
+    const headers = [...dims, ...mets].map(f => ({
+      id: f.id || f.name,
+      name: f.name || f.id
+    }));
+
+    const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
+    const rows = rowsObj.map(rowObj =>
+      headers.map(h => {
+        const v = rowObj?.[h.id];
+        return Array.isArray(v) ? v[0] : v;
+      })
+    );
+
+    // Devolvemos un "message" compatible con tableTransform
+    return {
+      ...data,
+      fields: { dimensions: dims, metrics: mets },
+      tables: { DEFAULT: { headers, rows } }
+    };
+  };
+
+  // Detecta si viene en objectTransform y normaliza
+  const isObjectTransform = Array.isArray(message?.tables?.DEFAULT);
+  const msg = isObjectTransform ? objectToTableShape(message) : message;
+
+  // ---- preparación del contenedor/mapa ----
   container.innerHTML = '';
   container.style.width = '100%';
   container.style.height = '100%';
 
-  const style = readStyle(message);
+  // Evita "Map container is already initialized."
+  if (container.__leafletMap) {
+    try { container.__leafletMap.remove(); } catch {}
+    container.__leafletMap = null;
+  }
+
+  // ---- estilo + datos ----
+  const style = readStyle(msg);                          // tu helper
   const nivel = style.nivelJerarquia || 'barrio';
-  const stats = buildValueMap(message);
-  const geojson = GEOJSON;
+
+  // buildValueMap espera formato table-like (headers/rows)
+  const stats = buildValueMap(msg);                      // tu helper (usa msg normalizado)
+  const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
 
   const map = L.map(container, { zoomControl: true, attributionControl: true });
+  container.__leafletMap = map;
 
+  // ---- estilo por feature (match robusto) ----
   const styleFn = (feature) => {
-    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
+    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty); // tu helper
     let v;
     if (stats?.map?.size) {
-      for (const k of normalizeKeyFuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+      for (const k of fuzzy(nombreRaw)) {
+        if (stats.map.has(k)) { v = stats.map.get(k); break; }
+      }
     }
+
     let fillColor;
     if (stats?.map?.size && Number.isFinite(v)) {
       const t = (v - stats.min) / ((stats.max - stats.min) || 1);
@@ -316,11 +410,12 @@ export default function drawVisualization(container, message = {}) {
         const idx = Math.max(0, Math.min(n - 1, Math.round(clamp01(t) * (n - 1))));
         fillColor = style.colorPalette.colors[idx];
       } else {
-        fillColor = colorFromScale(style.colorScale, t, style.invertScale);
+        fillColor = colorFromScale(style.colorScale, t, style.invertScale); // tu helper
       }
     } else {
       fillColor = style.colorMissing;
     }
+
     return {
       color: style.showBorders ? style.borderColor : 'transparent',
       weight: style.showBorders ? style.borderWidth : 0,
@@ -334,17 +429,23 @@ export default function drawVisualization(container, message = {}) {
     style: styleFn,
     onEachFeature: (feature, lyr) => {
       const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
-      const nombreLabel = String(nombreRaw); // mantener etiqueta original para UI
+      const nombreLabel = String(nombreRaw); // etiqueta “humana”
+
       if (style.showLabels) {
         lyr.bindTooltip(nombreLabel, { sticky: true, direction: 'center' });
       }
+
       let v;
       if (stats?.map?.size) {
-        for (const k of normalizeKeyFuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
+        for (const k of fuzzy(nombreRaw)) {
+          if (stats.map.has(k)) { v = stats.map.get(k); break; }
+        }
       }
+
       const content = (style.popupFormat || '')
         .replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel)
         .replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? String(v) : 's/d');
+
       lyr.bindPopup(content, { closeButton: false });
     }
   }).addTo(map);
@@ -353,6 +454,7 @@ export default function drawVisualization(container, message = {}) {
     const b = layer.getBounds();
     if (b && b.isValid && b.isValid()) {
       map.fitBounds(b, { padding: [16, 16] });
+      setTimeout(() => { try { map.invalidateSize(); } catch {} }, 0);
     } else {
       console.warn('[Viz] Bounds inválidos — GeoJSON vacío o sin features válidas.');
     }
@@ -360,6 +462,7 @@ export default function drawVisualization(container, message = {}) {
     console.warn('[Viz] No se pudo ajustar bounds:', e);
   }
 
+  // ---- leyenda opcional ----
   if (style.showLegend) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
@@ -407,7 +510,7 @@ export default function drawVisualization(container, message = {}) {
         sw.style.background = col;
 
         const label = document.createElement('span');
-        label.textContent = `${fmt(a)} – ${fmt(b)}`;
+        label.textContent = `${fmt(a)} – ${fmt(b)}`; // ← fixed template string
 
         row.appendChild(sw);
         row.appendChild(label);
@@ -418,6 +521,7 @@ export default function drawVisualization(container, message = {}) {
     legend.addTo(map);
   }
 }
+
 
 function fmt(n) {
   if (!Number.isFinite(n)) return 's/d';
@@ -495,16 +599,52 @@ function initWrapper(attempt = 1) {
         hasTableTransform: typeof dsccResolved.tableTransform === 'function'  // ← antes decía objectTransform
       });
 
-      dsccResolved.subscribeToData((data) => {
-        try {
-          console.group('[Viz] Datos con tableTransform');                    // ← cambia el label
-          console.log('[Viz] data:', JSON.stringify(data, null, 2));
-          drawVisualization(ensureContainer(), data);
-          console.groupEnd();
-        } catch (err) {
-          console.error('[Viz] Error procesando datos:', err);
+    dsccResolved.subscribeToData((data) => {
+      try {
+        console.group('[Viz] Datos con objectTransform');
+
+        // 1) normalizamos a forma "tabla"
+        const t = objectToTableShape(data);
+
+        // 2) logs equivalentes a los que ya usabas
+        console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
+        console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
+        console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
+        console.log(`Total de filas: ${t.rows.length}`);
+        if (t.rows.length > 0) {
+          const sampleCount = Math.min(t.rows.length, 5);
+          for (let i = 0; i < sampleCount; i++) {
+            const rowObj = {};
+            t.headers.forEach((h, idx) => { rowObj[h.name] = t.rows[i][idx]; });
+            console.log(`Fila ${i + 1}:`, rowObj);
+          }
+        } else {
+          console.warn('[Viz] La tabla normalizada no contiene filas.');
         }
-      }, { transform: dsccResolved.tableTransform });                          // ← usar tableTransform
+        console.groupEnd();
+
+        // 3) armamos un "table-like data" para tu drawVisualization existente
+        const tableLike = {
+          fields: {
+            dimensions: t.dims,
+            metrics: t.mets,
+          },
+          tables: {
+            DEFAULT: {
+              headers: t.headers,
+              rows: t.rows,
+            }
+          }
+        };
+
+        // 4) dibujar usando tu función existente
+        drawVisualization(ensureContainer(), tableLike);
+
+      } catch (err) {
+        console.error('[Viz] Error procesando datos (object→table):', err);
+      }
+    }, { transform: dsccResolved.objectTransform });
+                        // ← usar tableTransform
       return;
     }
 
