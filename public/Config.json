@@ -8,13 +8,13 @@
           "id": "geoDimension",
           "label": "Dimensión de Texto (GeoJSON ID)",
           "type": "DIMENSION",
-          "options": { "min": 1, "max": 1, "supportedTypes": ["DEFAULT"] }
-        },
+          "options": { "min": 1, "max": 1, "supportedTypes": ["TEXT"] }       
+         },
         {
           "id": "metricPrimary",
           "label": "Métrica Principal",
           "type": "METRIC",
-          "options": { "min": 1, "max": 1 }
+          "options": { "min": 1, "max": 1, "supportedTypes": ["NUMBER"] }
         }
       ]
     }
@@ -28,7 +28,7 @@
           "id": "nivelJerarquia",
           "label": "Nivel (barrio/comuna)",
           "type": "SELECT_SINGLE",
-          "defaultValue": "barrio",
+          "defaultValue": "BARRIO",
           "options": [
             { "label": "Barrio", "value": "barrio" },
             { "label": "Comuna", "value": "comuna" }
@@ -38,7 +38,7 @@
           "id": "geojsonProperty",
           "label": "Propiedad del GeoJSON a Coincidir",
           "type": "TEXTINPUT",
-          "defaultValue": ""
+          "defaultValue": "BARRIO"
         }
       ]
     },
