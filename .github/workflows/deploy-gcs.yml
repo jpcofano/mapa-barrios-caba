@@ -3,21 +3,27 @@ name: Deploy to GCS
 on:
   workflow_dispatch:
     inputs:
-      target_dir:
-        description: "Carpeta destino dentro del bucket (p.ej. barrios-caba-map-v2025-d)"
+      prefix:
+        description: "Prefijo de carpeta (p.ej. barrios-caba-map-v2025)"
         required: true
-        default: "barrios-caba-map-v2025-d"
-      build:
-        description: "Correr build de Node antes de deploy"
+        default: "barrios-caba-map-v2025"
+      version:
+        description: "Versión/sufijo de carpeta (p.ej. d, e, h...)"
         required: true
-        default: "true"
+        default: "d"
+      devMode:
+        description: "true/false para marcar dev en el manifest (si tu build lo usa)"
+        required: true
+        default: "false"
 
 permissions:
   contents: read
-  id-token: write   # imprescindible para OIDC / Workload Identity Federation
+  id-token: write   # imprescindible para OIDC / WIF
+
 env:
+  # GCP
   GCP_PROJECT_ID: mimetic-union-469017-f3
-  GCP_WIF_PROVIDER: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/github
+  GCP_WIF_PROVIDER: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/github-provider
   GCP_SERVICE_ACCOUNT: ci-deploy@mimetic-union-469017-f3.iam.gserviceaccount.com
   GCS_BUCKET: mapa-barrios-degcba
 
@@ -28,22 +34,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # (Opcional) Build con Node (Vite)
+      # ---------- Build ----------
       - name: Setup Node
-        if: ${{ inputs.build == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Install deps
-        if: ${{ inputs.build == 'true' }}
         run: npm ci
 
-      - name: Build
-        if: ${{ inputs.build == 'true' }}
-        run: npm run build
+      - name: Build (usa tus scripts)
+        run: |
+          echo "devMode=${{ github.event.inputs.devMode }}"
+          npm run build
 
-      # Auth por OIDC (WIF)
+      # (Opcional) Si tenés scripts/prepare-version.mjs y querés usarlo:
+      - name: Prepare version (opcional)
+        id: prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREFIX="${{ github.event.inputs.prefix }}"
+          VERSION="${{ github.event.inputs.version }}"
+          # Sanitizar NBSP/espacios y forzar minúsculas con guiones
+          PREFIX="${PREFIX//[$'\u00A0']/ }"; PREFIX="$(echo "$PREFIX" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/-/g')"
+          VERSION="${VERSION//[$'\u00A0']/ }"; VERSION="$(echo "$VERSION" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/-/g')"
+
+          # Si existe el script, usalo; si no, seguimos.
+          if [ -f scripts/prepare-version.mjs ]; then
+            node scripts/prepare-version.mjs --prefix="$PREFIX" --version="$VERSION" || true
+          fi
+
+          echo "TARGET_DIR=${PREFIX}-${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # ---------- Auth (OIDC / WIF) ----------
       - name: Auth to Google Cloud (OIDC)
         uses: google-github-actions/auth@v2
         with:
@@ -60,44 +84,35 @@ jobs:
           gcloud auth list
           gcloud config list
 
-      - name: Smoke test bucket (list)
-        run: gcloud storage ls gs://${{ env.GCS_BUCKET }}/
-
+      # ---------- Deploy ----------
       - name: Deploy to GCS
         env:
-          TARGET_DIR: ${{ inputs.target_dir }}
+          TARGET_DIR: ${{ steps.prep.outputs.TARGET_DIR }}
         run: |
           set -euo pipefail
-          # Carpeta destino: gs://<bucket>/<target_dir>/
           DEST="gs://${GCS_BUCKET}/${TARGET_DIR}/"
 
-          # Si no existe dist (porque build=false), creala mínima
-          if [ ! -d "dist" ]; then
-            mkdir -p dist
-          fi
+          echo ">> DEST = ${DEST}"
+          # Crear dist si no existe (por si el build no generó nada)
+          [ -d dist ] || mkdir -p dist
 
           echo ">> Copying dist/* to ${DEST}"
           gcloud storage cp -r dist/* "${DEST}"
 
-          # Setear metadatos clave si existen los archivos
-          if gcloud storage ls "${DEST}Visualization.js" >/dev/null 2>&1; then
-            gcloud storage objects update "${DEST}Visualization.js" \
-              --content-type=application/javascript --cache-control=no-store
-          fi
-          if gcloud storage ls "${DEST}Visualization.css" >/dev/null 2>&1; then
-            gcloud storage objects update "${DEST}Visualization.css" \
-              --content-type=text/css --cache-control=no-store
-          fi
-          if gcloud storage ls "${DEST}manifest.json" >/dev/null 2>&1; then
-            gcloud storage objects update "${DEST}manifest.json" \
-              --content-type=application/json --cache-control=no-store
-          fi
-          if gcloud storage ls "${DEST}Config.json" >/dev/null 2>&1; then
-            gcloud storage objects update "${DEST}Config.json" \
-              --content-type=application/json --cache-control=no-store
-          fi
+          # Metadatos (no-store + MIME correctos) si existen los archivos
+          for obj in Visualization.js Visualization.css manifest.json Config.json; do
+            if gcloud storage ls "${DEST}${obj}" >/dev/null 2>&1; then
+              case "$obj" in
+                Visualization.js)  CT=application/javascript ;;
+                Visualization.css) CT=text/css ;;
+                manifest.json|Config.json) CT=application/json ;;
+              esac
+              gcloud storage objects update "${DEST}${obj}" \
+                --content-type="${CT}" --cache-control=no-store
+            fi
+          done
 
       - name: List deployed files
         env:
-          TARGET_DIR: ${{ inputs.target_dir }}
+          TARGET_DIR: ${{ steps.prep.outputs.TARGET_DIR }}
         run: gcloud storage ls -r "gs://${{ env.GCS_BUCKET }}/${{ env.TARGET_DIR }}/"
