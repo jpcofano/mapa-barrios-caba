@@ -1,6 +1,6 @@
 {
   "name": "Barrios CABA Map",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "organization": "Tu Org",
   "description": "Mapa de barrios CABA con coropletas",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
@@ -8,7 +8,7 @@
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
   "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/",
-  "devMode": true,
+  "devMode": false,
   "sandboxMode": "IFRAME",
   "components": [
     {
