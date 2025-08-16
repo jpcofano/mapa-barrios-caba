@@ -12,7 +12,7 @@
   "sandboxMode": "IFRAME",
   "components": [
     {
-      "id": "70371ascfgg45550barrios-caba-map-v2025j",
+      "id": "70371asMMMMbarrios-caba-map-v2025M",
       "name": "Mapa Barrios CABA",
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
