@@ -1,106 +1,79 @@
-// scripts/prepare-version.mjs
-// Uso:
-//   node scripts/prepare-version.mjs --prefix="barrios-caba-map-v2025" --version="h" --bucket="mapa-barrios-degcba"
-// Efectos:
-//   - Calcula carpeta <prefix>-<version>
-//   - Escribe .bucket_path con gs://<bucket>/<prefix>-<version>/
-//   - Ajusta public/manifest.json y dist/manifest.json (si existe) para que:
-//       * packageUrl = https://storage.googleapis.com/<bucket>/<prefix>-<version>/
-//       * resource.{js,css,config} = rutas ABSOLUTAS (HTTPS) a esa carpeta
+#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ---------------- util ----------------
-function getArg(name, def = "") {
-  const re = new RegExp(`^--${name}=(.*)$`, "i");
-  const hit = process.argv.slice(2).find((a) => re.test(a));
-  return hit ? hit.replace(re, "$1") : def;
+function getArg(name, def = undefined) {
+  const i = process.argv.findIndex(a => a === `--${name}`);
+  if (i >= 0 && i + 1 < process.argv.length) return process.argv[i + 1];
+  return def;
 }
-function sanitizeSlug(s, { toLower = true } = {}) {
-  if (typeof s !== "string") return "";
-  let out = s.replace(/\u00A0/g, " ").trim();
-  if (toLower) out = out.toLowerCase();
-  out = out.replace(/\s+/g, "-");
-  out = out.replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
-  return out;
-}
-function ensureSlash(u) {
-  return u.endsWith("/") ? u : u + "/";
+const ensureSlash = (u) => (u.endsWith("/") ? u : u + "/");
+const toBool = (v, d=false) => {
+  if (v === undefined) return d;
+  return String(v).toLowerCase() === "true";
+};
+
+const bucket  = getArg("bucket");
+const prefix  = getArg("prefix");
+const version = getArg("version");
+const devMode = toBool(getArg("devMode","false"));
+const scheme  = (getArg("scheme","https") || "https").toLowerCase(); // https|gs
+const cfgName = getArg("configName","config.json"); // permite Config.json o config.json
+const setIdToFolder = toBool(getArg("setIdToFolder","true"));
+
+if (!bucket || !prefix || !version) {
+  console.error("Faltan args. Usá: --bucket --prefix --version [--devMode] [--scheme=https|gs] [--configName=config.json] [--setIdToFolder=true]");
+  process.exit(1);
 }
 
-function updateManifestAtPath(atPath, httpsBaseAbs) {
-  if (!fs.existsSync(atPath)) return false;
-  const manifest = JSON.parse(fs.readFileSync(atPath, "utf8"));
+const folderName = `${prefix}-${version}`;
+const HTTPS_BASE = `https://storage.googleapis.com/${bucket}/${folderName}`;
+const GS_BASE    = `gs://${bucket}/${folderName}`;
+const baseAbs    = scheme === "gs" ? GS_BASE : HTTPS_BASE;
 
-  // packageUrl también queda en absoluto (no estorba, y ayuda al preview local)
-  manifest.packageUrl = ensureSlash(httpsBaseAbs);
-
-  const applyAbsoluteResources = (resObj) => {
-    if (!resObj || typeof resObj !== "object") return;
-    resObj.js     = `${httpsBaseAbs}/Visualization.js`;
-    resObj.css    = `${httpsBaseAbs}/Visualization.css`;
-    resObj.config = `${httpsBaseAbs}/Config.json`;
-  };
-
-  // resources por component
-  if (Array.isArray(manifest.components)) {
-    manifest.components = manifest.components.map((c) => {
-      const copy = { ...c };
-      if (!copy.resource) copy.resource = {};
-      applyAbsoluteResources(copy.resource);
-      return copy;
-    });
-  }
-
-  // manifests antiguos que tienen resource en la raíz
-  if (manifest.resource && typeof manifest.resource === "object") {
-    applyAbsoluteResources(manifest.resource);
-  }
-
-  fs.writeFileSync(atPath, JSON.stringify(manifest, null, 2));
-  return true;
+const manifestPath = path.join("public","manifest.json");
+if (!fs.existsSync(manifestPath)) {
+  console.error("No existe public/manifest.json");
+  process.exit(2);
 }
 
-// ---------------- args ----------------
-const DEFAULT_BUCKET = "mapa-barrios-degcba";
-const argPrefix  = getArg("prefix", "barrios-caba-map-v2025");
-const argVersion = getArg("version", "dev");
-const argBucket  = getArg("bucket", DEFAULT_BUCKET);
+const raw = fs.readFileSync(manifestPath, "utf8");
+// Quitar BOM si existiera
+const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
 
-const prefix  = sanitizeSlug(argPrefix);
-const version = sanitizeSlug(argVersion);
-const bucket  = sanitizeSlug(argBucket, { toLower: false });
+let manifest;
+try {
+  manifest = JSON.parse(text);
+} catch (e) {
+  console.error("manifest.json inválido:", e.message);
+  process.exit(3);
+}
 
-if (!prefix)  { console.error("[prepare-version] ERROR: --prefix inválido");  process.exit(1); }
-if (!version) { console.error("[prepare-version] ERROR: --version inválido"); process.exit(1); }
-if (!bucket)  { console.error("[prepare-version] ERROR: --bucket inválido");  process.exit(1); }
+// packageUrl (dejamos https para preview), devMode
+manifest.packageUrl = ensureSlash(HTTPS_BASE);
+manifest.devMode = devMode;
 
-const folderName  = `${prefix}-${version}`;
-const GS_BASE     = `gs://${bucket}/${folderName}`;
-const HTTPS_BASE  = `https://storage.googleapis.com/${bucket}/${folderName}`;
+// Alinear components / resource
+if (Array.isArray(manifest.components)) {
+  manifest.components = manifest.components.map((c, idx) => {
+    const copy = { ...c };
+    if (setIdToFolder || !copy.id) copy.id = folderName;
+    if (!copy.resource || typeof copy.resource !== "object") copy.resource = {};
+    copy.resource.js     = `${baseAbs}/Visualization.js`;
+    copy.resource.css    = `${baseAbs}/Visualization.css`;
+    copy.resource.config = `${baseAbs}/${cfgName}`;
+    return copy;
+  });
+}
 
-const manifestPublic = path.resolve(__dirname, "..", "public", "manifest.json");
-const manifestDist   = path.resolve(__dirname, "..", "dist",   "manifest.json");
+// Guardar con salto de línea final
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
 
-// ---------------- run ----------------
-let changedPub = false, changedDist = false;
-try { changedPub  = updateManifestAtPath(manifestPublic, HTTPS_BASE); }
-catch (e) { console.warn(`[prepare-version] WARN public: ${e?.message || e}`); }
-
-try { changedDist = updateManifestAtPath(manifestDist, HTTPS_BASE); }
-catch (e) { console.warn(`[prepare-version] WARN dist: ${e?.message || e}`); }
-
-// .bucket_path para el deploy
-fs.writeFileSync(path.resolve(__dirname, "..", ".bucket_path"), ensureSlash(GS_BASE));
-
-// logs útiles
-console.log(`[prepare-version] carpeta           : ${folderName}`);
-console.log(`[prepare-version] gs path           : ${ensureSlash(GS_BASE)}`);
-console.log(`[prepare-version] https base (abs)  : ${ensureSlash(HTTPS_BASE)}`);
-console.log(`[prepare-version] public manifest   : ${changedPub ? "OK" : "no existe"}`);
-console.log(`[prepare-version] dist manifest     : ${changedDist ? "OK" : "no existe"}`);
+console.log("=== prepare-version.mjs ===");
+console.log("bucket:      ", bucket);
+console.log("folder:      ", folderName);
+console.log("scheme:      ", scheme);
+console.log("configName:  ", cfgName);
+console.log("devMode:     ", devMode);
+console.log("setIdToFolder:", setIdToFolder);
+console.log("Manifest actualizado OK.");

@@ -4,115 +4,174 @@ on:
   workflow_dispatch:
     inputs:
       prefix:
-        description: "Prefijo de carpeta (p.ej. barrios-caba-map-v2025)"
+        description: "Carpeta base (ej: barrios-caba-map-v2025)"
         required: true
         default: "barrios-caba-map-v2025"
       version:
-        description: "Versión/sufijo de carpeta (p.ej. d, e, h...)"
+        description: "Sufijo de versión (ej: m)"
         required: true
-        default: "d"
+        default: "m"
       devMode:
-        description: "true/false para marcar dev en el manifest (si tu build lo usa)"
+        description: "devMode en el manifest (true|false)"
         required: true
         default: "false"
-
-permissions:
-  contents: read
-  id-token: write   # imprescindible para OIDC / WIF
-
-env:
-  # GCP
-  GCP_PROJECT_ID: mimetic-union-469017-f3
-  GCP_WIF_PROVIDER: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/github
-  GCP_SERVICE_ACCOUNT: ci-deploy@mimetic-union-469017-f3.iam.gserviceaccount.com
-  GCS_BUCKET: mapa-barrios-degcba
+      # Opcionales (quedan con defaults sensatos)
+      bucket:
+        description: "Bucket GCS"
+        required: true
+        default: "mapa-barrios-degcba"
+      scheme:
+        description: "Esquema de resources (https|gs)"
+        required: true
+        default: "https"
+      configName:
+        description: "Nombre del config (config.json o Config.json)"
+        required: true
+        default: "config.json"
+      setIdToFolder:
+        description: "Forzar id del componente = carpeta (true|false)"
+        required: true
+        default: "true"
+      setIamPublic:
+        description: "(Opcional) Dar allUsers:objectViewer si falta"
+        required: true
+        default: "false"
+      applyCors:
+        description: "(Opcional) Aplicar cors.json del repo"
+        required: true
+        default: "false"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # no se usa con esta forma de login, pero lo dejo por si migrás
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # ---------- Build ----------
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
       - name: Install deps
         run: npm ci
 
-      - name: Build (usa tus scripts)
-        run: |
-          echo "devMode=${{ github.event.inputs.devMode }}"
-          npm run build
+      - name: Build (si aplica)
+        run: npm run build --if-present
 
-      # (Opcional) Si tenés scripts/prepare-version.mjs y querés usarlo:
-      - name: Prepare version (opcional)
-        id: prep
-        shell: bash
-        run: |
-          set -euo pipefail
-          PREFIX="${{ github.event.inputs.prefix }}"
-          VERSION="${{ github.event.inputs.version }}"
-          # Sanitizar NBSP/espacios y forzar minúsculas con guiones
-          PREFIX="${PREFIX//[$'\u00A0']/ }"; PREFIX="$(echo "$PREFIX" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/-/g')"
-          VERSION="${VERSION//[$'\u00A0']/ }"; VERSION="$(echo "$VERSION" | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+/-/g')"
-
-          # Si existe el script, usalo; si no, seguimos.
-          if [ -f scripts/prepare-version.mjs ]; then
-            node scripts/prepare-version.mjs --prefix="$PREFIX" --version="$VERSION" || true
-          fi
-
-          echo "TARGET_DIR=${PREFIX}-${VERSION}" >> "$GITHUB_OUTPUT"
-
-      # ---------- Auth (OIDC / WIF) ----------
-      - name: Auth to Google Cloud (OIDC)
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
-          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
-
-      - name: Setup gcloud
+      # 🔐 **LOGIN** como lo tenías: service_account_key + export_default_credentials
+      - name: Setup gcloud + gsutil (classic SA key)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GCP_SA_KEY }}   # <- tu JSON de la SA (p.ej. ci-deploy@…)
+          export_default_credentials: true
+          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional; o hardcodeá si querés
 
-      - name: Debug gcloud identity
+      - name: Compute vars
+        id: vars
         run: |
-          gcloud auth list
-          gcloud config list
+          echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
+          echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # ---------- Deploy ----------
-      - name: Deploy to GCS
+      # Si usás mi prepare-version.mjs “nuevo”, esto alinea id/packageUrl/resource y respeta configName/scheme
+      - name: Prepare manifest/resources
+        run: |
+          node scripts/prepare-version.mjs \
+            --bucket="${{ steps.vars.outputs.BUCKET }}" \
+            --prefix="${{ github.event.inputs.prefix }}" \
+            --version="${{ github.event.inputs.version }}" \
+            --devMode="${{ github.event.inputs.devMode }}" \
+            --scheme="${{ github.event.inputs.scheme }}" \
+            --configName="${{ github.event.inputs.configName }}" \
+            --setIdToFolder="${{ github.event.inputs.setIdToFolder }}"
+
+          echo "==== manifest.json (result) ===="
+          cat public/manifest.json
+
+      - name: Upload to GCS (core files + estáticos)
         env:
-          TARGET_DIR: ${{ steps.prep.outputs.TARGET_DIR }}
+          B: ${{ steps.vars.outputs.BUCKET }}
+          V: ${{ steps.vars.outputs.FOLDER }}
+          CFG: ${{ github.event.inputs.configName }}
         run: |
-          set -euo pipefail
-          DEST="gs://${GCS_BUCKET}/${TARGET_DIR}/"
+          set -e
 
-          echo ">> DEST = ${DEST}"
-          # Crear dist si no existe (por si el build no generó nada)
-          [ -d dist ] || mkdir -p dist
+          # manifest y config con no-store
+          gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/manifest.json gs://$B/$V/manifest.json
 
-          echo ">> Copying dist/* to ${DEST}"
-          gcloud storage cp -r dist/* "${DEST}"
+          gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/$CFG gs://$B/$V/$CFG
 
-          # Metadatos (no-store + MIME correctos) si existen los archivos
-          for obj in Visualization.js Visualization.css manifest.json config.json; do
-            if gcloud storage ls "${DEST}${obj}" >/dev/null 2>&1; then
-              case "$obj" in
-                Visualization.js)  CT=application/javascript ;;
-                Visualization.css) CT=text/css ;;
-                manifest.json|config.json) CT=application/json ;;
-              esac
-              gcloud storage objects update "${DEST}${obj}" \
-                --content-type="${CT}" --cache-control=no-store
+          # JS/CSS (no-store mientras iterás)
+          if [ -f "dist/Visualization.js" ]; then
+            gsutil -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
+              cp dist/Visualization.js gs://$B/$V/Visualization.js
+          elif [ -f "public/Visualization.js" ]; then
+            gsutil -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
+              cp public/Visualization.js gs://$B/$V/Visualization.js
+          fi
+
+          if [ -f "dist/Visualization.css" ]; then
+            gsutil -h "Cache-Control:no-store" -h "Content-Type: text/css" \
+              cp dist/Visualization.css gs://$B/$V/Visualization.css
+          elif [ -f "public/Visualization.css" ]; then
+            gsutil -h "Cache-Control:no-store" -h "Content-Type: text/css" \
+              cp public/Visualization.css gs://$B/$V/Visualization.css
+          fi
+
+          # Estáticos opcionales (cache largo)
+          for f in Icon.png Logo.png package.html privacy.html support.html barrioscaba.geojson barrioscaba.js; do
+            if [ -f "public/$f" ]; then
+              gsutil -h "Cache-Control:public, max-age=31536000, immutable" \
+                cp public/$f gs://$B/$V/$f || true
             fi
           done
 
-      - name: List deployed files
+      - name: (Opcional) Bucket público por IAM
+        if: ${{ github.event.inputs.setIamPublic == 'true' }}
         env:
-          TARGET_DIR: ${{ steps.prep.outputs.TARGET_DIR }}
-        run: gcloud storage ls -r "gs://${{ env.GCS_BUCKET }}/${{ env.TARGET_DIR }}/"
+          B: ${{ steps.vars.outputs.BUCKET }}
+        run: |
+          gsutil iam ch allUsers:objectViewer gs://$B
+
+      - name: (Opcional) Aplicar CORS desde cors.json del repo
+        if: ${{ github.event.inputs.applyCors == 'true' }}
+        env:
+          B: ${{ steps.vars.outputs.BUCKET }}
+        run: |
+          if [ -f "cors.json" ]; then
+            gsutil cors set cors.json gs://$B
+          else
+            echo "cors.json no encontrado, omito"
+          fi
+
+      - name: Verify HEAD
+        env:
+          B: ${{ steps.vars.outputs.BUCKET }}
+          V: ${{ steps.vars.outputs.FOLDER }}
+          CFG: ${{ github.event.inputs.configName }}
+        run: |
+          for u in \
+            "https://storage.googleapis.com/$B/$V/manifest.json" \
+            "https://storage.googleapis.com/$B/$V/$CFG" \
+            "https://storage.googleapis.com/$B/$V/Visualization.js" \
+            "https://storage.googleapis.com/$B/$V/Visualization.css"
+          do
+            echo "::group::HEAD $u"
+            curl -I -sS "$u" | sed -n '1p;/^content-type:/Ip;/^cache-control:/Ip'
+            echo "::endgroup::"
+          done
+
+      - name: Output URLs
+        env:
+          B: ${{ steps.vars.outputs.BUCKET }}
+          V: ${{ steps.vars.outputs.FOLDER }}
+        run: |
+          echo "Manifest:  https://storage.googleapis.com/$B/$V/manifest.json"
+          echo "Package:   https://storage.googleapis.com/$B/$V/"
+          echo "Allowlist (reporte): gs://$B/$V"
