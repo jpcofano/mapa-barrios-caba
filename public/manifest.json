@@ -19,7 +19,7 @@
       "resource": {
         "js": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-m/Visualization.js",
         "css": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-m/Visualization.css",
-        "config": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-m/Config.json"
+        "config": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-m/config.json"
       }
     }
   ]
