@@ -8,11 +8,11 @@
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
   "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/barrios-caba-map-v2025-m/",
-  "devMode": false,
+  "devMode": true,
   "sandboxMode": "IFRAME",
   "components": [
     {
-      "id": "barrios-caba-map-v2025-m",
+      "id": "barrioscabamapv2025m",
       "name": "Mapa Barrios CABA",
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
