@@ -3,6 +3,7 @@ name: Deploy to GCS
 on:
   workflow_dispatch:
     inputs:
+      # Requeridos
       prefix:
         description: "Carpeta base (ej: barrios-caba-map-v2025)"
         required: true
@@ -15,7 +16,8 @@ on:
         description: "devMode en el manifest (true|false)"
         required: true
         default: "false"
-      # Opcionales (quedan con defaults sensatos)
+
+      # Opcionales (con defaults sensatos)
       bucket:
         description: "Bucket GCS"
         required: true
@@ -46,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # no se usa con esta forma de login, pero lo dejo por si migrás
+      id-token: write  # queda por compatibilidad
 
     steps:
       - name: Checkout
@@ -63,13 +65,13 @@ jobs:
       - name: Build (si aplica)
         run: npm run build --if-present
 
-      # 🔐 **LOGIN** como lo tenías: service_account_key + export_default_credentials
+      # 🔐 LOGIN clásico con service account key (el que ya usabas)
       - name: Setup gcloud + gsutil (classic SA key)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}   # <- tu JSON de la SA (p.ej. ci-deploy@…)
+          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de la SA
           export_default_credentials: true
-          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional; o hardcodeá si querés
+          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional si tu SA ya fija proyecto
 
       - name: Compute vars
         id: vars
@@ -77,17 +79,41 @@ jobs:
           echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
           echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # Si usás mi prepare-version.mjs “nuevo”, esto alinea id/packageUrl/resource y respeta configName/scheme
+      # 🔧 PREPARE: pasa TODOS los args al script y muestra el manifest final
       - name: Prepare manifest/resources
+        env:
+          BUCKET:  ${{ github.event.inputs.bucket }}
+          PREFIX:  ${{ github.event.inputs.prefix }}
+          VERSION: ${{ github.event.inputs.version }}
+          DEVMODE: ${{ github.event.inputs.devMode }}
+          SCHEME:  ${{ github.event.inputs.scheme }}
+          CONFIGNAME:   ${{ github.event.inputs.configName }}
+          SETIDTOFOLDER: ${{ github.event.inputs.setIdToFolder }}
         run: |
-          node scripts/prepare-version.mjs \
-            --bucket="${{ steps.vars.outputs.BUCKET }}" \
-            --prefix="${{ github.event.inputs.prefix }}" \
-            --version="${{ github.event.inputs.version }}" \
-            --devMode="${{ github.event.inputs.devMode }}" \
-            --scheme="${{ github.event.inputs.scheme }}" \
-            --configName="${{ github.event.inputs.configName }}" \
-            --setIdToFolder="${{ github.event.inputs.setIdToFolder }}"
+          set -euo pipefail
+
+          : "${BUCKET:=mapa-barrios-degcba}"
+          : "${PREFIX:?Falta input prefix}"
+          : "${VERSION:?Falta input version}"
+          : "${DEVMODE:=false}"
+          : "${SCHEME:=https}"
+          : "${CONFIGNAME:=config.json}"
+          : "${SETIDTOFOLDER:=true}"
+
+          echo "ARGS → bucket=$BUCKET, prefix=$PREFIX, version=$VERSION, devMode=$DEVMODE, scheme=$SCHEME, configName=$CONFIGNAME, setIdToFolder=$SETIDTOFOLDER"
+
+          SCRIPT="scripts/prepare-version.mjs"
+          [ -f "$SCRIPT" ] || SCRIPT="prepare-version.mjs"
+          [ -f "$SCRIPT" ] || { echo "No se encontró $SCRIPT"; exit 2; }
+
+          node "$SCRIPT" \
+            --bucket="$BUCKET" \
+            --prefix="$PREFIX" \
+            --version="$VERSION" \
+            --devMode="$DEVMODE" \
+            --scheme="$SCHEME" \
+            --configName="$CONFIGNAME" \
+            --setIdToFolder="$SETIDTOFOLDER"
 
           echo "==== manifest.json (result) ===="
           cat public/manifest.json
@@ -99,6 +125,8 @@ jobs:
           CFG: ${{ github.event.inputs.configName }}
         run: |
           set -e
+
+          test -f public/manifest.json
 
           # manifest y config con no-store
           gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
