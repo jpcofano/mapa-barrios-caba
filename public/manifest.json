@@ -12,12 +12,12 @@
   "sandboxMode": "IFRAME",
   "components": [
     {
-      "id": "70371550barrios-caba-map-v2025i",
+      "id": "70371ascfgg45550barrios-caba-map-v2025j",
       "name": "Mapa Barrios CABA",
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
       "resource": {
-        "js": ["https://storage.googleapis.com/mapa-barrios-degcb/Visualization.js"],
+        "js": ["https://storage.googleapis.com/mapa-barrios-degcba/Visualization.js"],
         "css": ["https://storage.googleapis.com/mapa-barrios-degcba/Visualization.css"],
         "config": "https://storage.googleapis.com/mapa-barrios-degcba/Config.json"
       }
