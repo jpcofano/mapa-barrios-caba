@@ -1,138 +1,114 @@
 {
   "data": {
-    "supportedTransforms": [
-      { "type": "geo_transform" }
-    ],
     "fields": {
       "geoDimension": {
         "name": "ID del polígono (GeoJSON)",
         "types": ["TEXT"],
         "required": true,
         "max": 1,
-        "description": "Dimensión de texto que coincide con el ID del barrio en el GeoJSON (ej.: feature.properties.ID_BARRIO)."
-      },
-      "barrioNombre": {
-        "name": "Nombre de barrio (opcional)",
-        "types": ["TEXT"],
-        "required": false,
-        "max": 1,
-        "description": "Nombre legible para tooltip/etiquetas (si no se provee, se mostrará solo el ID)."
+        "description": "Dimensión de texto que matchea con el nombre/ID del barrio en el GeoJSON."
       },
       "metricPrimary": {
         "name": "Métrica principal (color)",
         "types": ["NUMBER"],
         "required": true,
         "max": 1,
-        "description": "Métrica usada para colorear las áreas (alcance, tasa, índice, etc.)."
-      },
-      "metricSecondary": {
-        "name": "Métrica secundaria (opcional)",
-        "types": ["NUMBER"],
-        "required": false,
-        "max": 1,
-        "description": "Métrica adicional para tooltip/comparativo (no afecta el color)."
-      },
-      "segment": {
-        "name": "Categoría/segmento (opcional)",
-        "types": ["TEXT"],
-        "required": false,
-        "max": 1,
-        "description": "Categoría para filtrar/sombrear (no afecta el color)."
+        "description": "Métrica numérica usada para colorear el polígono."
       }
     }
   },
   "style": [
     {
-      "id": "colorScale",
-      "label": "Escala de color",
+      "id": "mapSetup",
+      "label": "Mapa / GeoJSON",
       "elements": [
         {
           "type": "select",
-          "id": "scaleType",
-          "label": "Tipo de escala",
+          "id": "nivelJerarquia",
+          "label": "Nivel",
           "options": [
-            { "label": "Cuantiles (quantile)", "value": "quantile" },
-            { "label": "Cuantización (quantize)", "value": "quantize" },
-            { "label": "Lineal (continuous)", "value": "linear" }
+            { "label": "Barrios", "value": "barrio" },
+            { "label": "Comunas", "value": "comuna" }
           ],
-          "defaultValue": "quantile"
+          "defaultValue": "barrio"
         },
         {
-          "type": "number",
-          "id": "classes",
-          "label": "Clases (para quantile/quantize)",
-          "min": 3,
-          "max": 9,
-          "defaultValue": 5
+          "type": "text",
+          "id": "geojsonProperty",
+          "label": "Propiedad de nombre en GeoJSON (opcional)",
+          "placeholder": "Ej.: NOMBRE_BARRIO"
+        }
+      ]
+    },
+    {
+      "id": "paint",
+      "label": "Colores y escala",
+      "elements": [
+        {
+          "type": "select",
+          "id": "colorScale",
+          "label": "Escala",
+          "options": [
+            { "label": "Verde → Rojo", "value": "greenToRed" },
+            { "label": "Azul → Amarillo", "value": "blueToYellow" },
+            { "label": "Grises", "value": "grayscale" },
+            { "label": "Amarillos", "value": "yellow" }
+          ],
+          "defaultValue": "greenToRed"
         },
-        { "type": "color", "id": "minColor", "label": "Color mínimo", "defaultValue": "#f7fbff" },
-        { "type": "color", "id": "midColor", "label": "Color medio",  "defaultValue": "#6baed6" },
-        { "type": "color", "id": "maxColor", "label": "Color máximo", "defaultValue": "#08306b" },
-        { "type": "checkbox", "id": "reverse", "label": "Invertir paleta", "defaultValue": false }
+        { "type": "checkbox", "id": "invertScale", "label": "Invertir escala", "defaultValue": false },
+        { "type": "opacity",  "id": "opacity",     "label": "Opacidad de relleno", "defaultValue": 0.45 },
+        { "type": "color",    "id": "colorMissing","label": "Color para nulos/sin dato", "defaultValue": "#cccccc" },
+        {
+          "type": "text",
+          "id": "customPalette",
+          "label": "Paleta personalizada (hex separados por coma)",
+          "placeholder": "#f7fbff,#6baed6,#08306b"
+        }
       ]
     },
     {
-      "id": "nullHandling",
-      "label": "Valores nulos / cero",
+      "id": "borders",
+      "label": "Bordes",
       "elements": [
-        { "type": "color", "id": "nullColor", "label": "Color para nulos", "defaultValue": "#d9d9d9" },
-        { "type": "checkbox", "id": "zeroAsNull", "label": "Tratar 0 como nulo", "defaultValue": false },
-        { "type": "checkbox", "id": "clipOutliers", "label": "Recortar outliers (p5–p95)", "defaultValue": false }
+        { "type": "checkbox",  "id": "showBorders",  "label": "Mostrar bordes",   "defaultValue": true },
+        { "type": "color",     "id": "borderColor",  "label": "Color de borde",   "defaultValue": "#000000" },
+        { "type": "lineWeight","id": "borderWidth",  "label": "Grosor de borde",  "defaultValue": 1 },
+        { "type": "opacity",   "id": "borderOpacity","label": "Opacidad de borde","defaultValue": 1 }
       ]
     },
     {
-      "id": "fillStroke",
-      "label": "Relleno y borde",
+      "id": "labelsLegend",
+      "label": "Etiquetas y leyenda",
       "elements": [
-        { "type": "opacity", "id": "fillOpacity", "label": "Opacidad de relleno", "defaultValue": 0.9 },
-        { "type": "color", "id": "strokeColor", "label": "Color de borde", "defaultValue": "#ffffff" },
-        { "type": "lineWeight", "id": "strokeWidth", "label": "Grosor de borde", "defaultValue": 1 }
-      ]
-    },
-    {
-      "id": "legend",
-      "label": "Leyenda",
-      "elements": [
+        { "type": "checkbox", "id": "showLabels", "label": "Mostrar etiquetas (tooltip)", "defaultValue": true },
         { "type": "checkbox", "id": "showLegend", "label": "Mostrar leyenda", "defaultValue": true },
         {
           "type": "select",
           "id": "legendPosition",
-          "label": "Posición",
+          "label": "Posición de la leyenda",
           "options": [
-            { "label": "Auto", "value": "auto" },
-            { "label": "Arriba", "value": "top" },
-            { "label": "Derecha", "value": "right" },
-            { "label": "Abajo", "value": "bottom" },
-            { "label": "Izquierda", "value": "left" }
+            { "label": "Arriba izquierda", "value": "topleft" },
+            { "label": "Arriba derecha",  "value": "topright" },
+            { "label": "Abajo izquierda", "value": "bottomleft" },
+            { "label": "Abajo derecha",   "value": "bottomright" }
           ],
-          "defaultValue": "auto"
+          "defaultValue": "bottomright"
         }
       ]
     },
     {
-      "id": "tooltip",
-      "label": "Tooltip",
+      "id": "popup",
+      "label": "Popup",
       "elements": [
-        { "type": "checkbox", "id": "showTooltip", "label": "Mostrar tooltip", "defaultValue": true },
-        { "type": "checkbox", "id": "tooltipShowBarrio", "label": "Incluir 'Barrio'", "defaultValue": true },
-        { "type": "checkbox", "id": "tooltipShowMetric", "label": "Incluir métrica principal", "defaultValue": true },
         {
-          "type": "select",
-          "id": "valueFormat",
-          "label": "Formato del valor",
-          "options": [
-            { "label": "Automático", "value": "auto" },
-            { "label": "Entero", "value": "integer" },
-            { "label": "Dos decimales", "value": "2d" },
-            { "label": "Porcentaje", "value": "percent" },
-            { "label": "Abreviado (K/M)", "value": "compact" }
-          ],
-          "defaultValue": "auto"
+          "type": "text",
+          "id": "popupFormat",
+          "label": "Formato (usa {{nombre}} y {{valor}})",
+          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
         }
       ]
     }
   ],
-  "features": {
-    "beta": false
-  }
+  "features": {}
 }
