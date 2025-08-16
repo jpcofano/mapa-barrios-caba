@@ -100,12 +100,12 @@ jobs:
           gcloud storage cp -r dist/* "${DEST}"
 
           # Metadatos (no-store + MIME correctos) si existen los archivos
-          for obj in Visualization.js Visualization.css manifest.json Config.json; do
+          for obj in Visualization.js Visualization.css manifest.json config.json; do
             if gcloud storage ls "${DEST}${obj}" >/dev/null 2>&1; then
               case "$obj" in
                 Visualization.js)  CT=application/javascript ;;
                 Visualization.css) CT=text/css ;;
-                manifest.json|Config.json) CT=application/json ;;
+                manifest.json|config.json) CT=application/json ;;
               esac
               gcloud storage objects update "${DEST}${obj}" \
                 --content-type="${CT}" --cache-control=no-store
