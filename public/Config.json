@@ -8,7 +8,7 @@
           "id": "geoDimension",
           "label": "ID del polígono (Geo/Texto)",
           "type": "DIMENSION",
-          "options": { "min": 1, "max": 1, "supportedTypes": ["TEXT"] }
+          "options": { "min": 1, "max": 1, "supportedTypes": ["GEO", "TEXT"] }
         },
         {
           "id": "metricPrimary",
@@ -93,12 +93,7 @@
       "label": "Bordes",
       "elements": [
         { "type": "CHECKBOX", "id": "showBorders", "label": "Mostrar bordes", "defaultValue": true },
-        {
-          "type": "BORDER_COLOR",
-          "id": "borderColor",
-          "label": "Color de borde",
-          "defaultValue": { "color": "#000000" }
-        },
+        { "type": "BORDER_COLOR", "id": "borderColor", "label": "Color de borde", "defaultValue": { "color": "#000000" } },
         { "type": "LINE_WEIGHT", "id": "borderWidth", "label": "Grosor de borde", "defaultValue": 1 },
         { "type": "OPACITY", "id": "borderOpacity", "label": "Opacidad de borde", "defaultValue": 1 }
       ]
