@@ -1,29 +1,31 @@
 {
-  "data": {
-    "fields": {
-      "geoDimension": {
-        "name": "ID del polígono (GeoJSON)",
-        "types": ["TEXT"],
-        "required": true,
-        "max": 1,
-        "description": "Dimensión de texto que matchea con el nombre/ID del barrio en el GeoJSON."
-      },
-      "metricPrimary": {
-        "name": "Métrica principal (color)",
-        "types": ["NUMBER"],
-        "required": true,
-        "max": 1,
-        "description": "Métrica numérica usada para colorear el polígono."
-      }
+  "data": [
+    {
+      "id": "datos",
+      "label": "Datos",
+      "elements": [
+        {
+          "id": "geoDimension",
+          "label": "ID del polígono (Geo/Texto)",
+          "type": "DIMENSION",
+          "options": { "min": 1, "max": 1, "supportedTypes": ["TEXT"] }
+        },
+        {
+          "id": "metricPrimary",
+          "label": "Métrica principal (color)",
+          "type": "METRIC",
+          "options": { "min": 1, "max": 1 }
+        }
+      ]
     }
-  },
+  ],
   "style": [
     {
       "id": "mapSetup",
       "label": "Mapa / GeoJSON",
       "elements": [
         {
-          "type": "select",
+          "type": "SELECT_SINGLE",
           "id": "nivelJerarquia",
           "label": "Nivel",
           "options": [
@@ -33,7 +35,7 @@
           "defaultValue": "barrio"
         },
         {
-          "type": "text",
+          "type": "TEXTINPUT",
           "id": "geojsonProperty",
           "label": "Propiedad de nombre en GeoJSON (opcional)",
           "placeholder": "Ej.: NOMBRE_BARRIO"
@@ -45,9 +47,9 @@
       "label": "Colores y escala",
       "elements": [
         {
-          "type": "select",
+          "type": "SELECT_SINGLE",
           "id": "colorScale",
-          "label": "Escala",
+          "label": "Escala continua",
           "options": [
             { "label": "Verde → Rojo", "value": "greenToRed" },
             { "label": "Azul → Amarillo", "value": "blueToYellow" },
@@ -56,14 +58,33 @@
           ],
           "defaultValue": "greenToRed"
         },
-        { "type": "checkbox", "id": "invertScale", "label": "Invertir escala", "defaultValue": false },
-        { "type": "opacity",  "id": "opacity",     "label": "Opacidad de relleno", "defaultValue": 0.45 },
-        { "type": "color",    "id": "colorMissing","label": "Color para nulos/sin dato", "defaultValue": "#cccccc" },
+        { "type": "CHECKBOX", "id": "invertScale", "label": "Invertir escala", "defaultValue": false },
+        { "type": "OPACITY", "id": "opacity", "label": "Opacidad de relleno", "defaultValue": 0.45 },
         {
-          "type": "text",
+          "type": "FILL_COLOR",
+          "id": "colorMissing",
+          "label": "Color nulos / sin dato",
+          "defaultValue": { "color": "#cccccc" }
+        },
+        {
+          "type": "TEXTINPUT",
           "id": "customPalette",
           "label": "Paleta personalizada (hex separados por coma)",
           "placeholder": "#f7fbff,#6baed6,#08306b"
+        },
+        {
+          "type": "SELECT_SINGLE",
+          "id": "colorPalette",
+          "label": "Paleta predefinida (categórica)",
+          "options": [
+            { "label": "Viridis", "value": "viridis" },
+            { "label": "Blues", "value": "blues" },
+            { "label": "Greens", "value": "greens" },
+            { "label": "Reds", "value": "reds" },
+            { "label": "Purples", "value": "purples" },
+            { "label": "Oranges", "value": "oranges" }
+          ],
+          "defaultValue": "viridis"
         }
       ]
     },
@@ -71,27 +92,32 @@
       "id": "borders",
       "label": "Bordes",
       "elements": [
-        { "type": "checkbox",  "id": "showBorders",  "label": "Mostrar bordes",   "defaultValue": true },
-        { "type": "color",     "id": "borderColor",  "label": "Color de borde",   "defaultValue": "#000000" },
-        { "type": "lineWeight","id": "borderWidth",  "label": "Grosor de borde",  "defaultValue": 1 },
-        { "type": "opacity",   "id": "borderOpacity","label": "Opacidad de borde","defaultValue": 1 }
+        { "type": "CHECKBOX", "id": "showBorders", "label": "Mostrar bordes", "defaultValue": true },
+        {
+          "type": "BORDER_COLOR",
+          "id": "borderColor",
+          "label": "Color de borde",
+          "defaultValue": { "color": "#000000" }
+        },
+        { "type": "LINE_WEIGHT", "id": "borderWidth", "label": "Grosor de borde", "defaultValue": 1 },
+        { "type": "OPACITY", "id": "borderOpacity", "label": "Opacidad de borde", "defaultValue": 1 }
       ]
     },
     {
       "id": "labelsLegend",
       "label": "Etiquetas y leyenda",
       "elements": [
-        { "type": "checkbox", "id": "showLabels", "label": "Mostrar etiquetas (tooltip)", "defaultValue": true },
-        { "type": "checkbox", "id": "showLegend", "label": "Mostrar leyenda", "defaultValue": true },
+        { "type": "CHECKBOX", "id": "showLabels", "label": "Mostrar etiquetas (tooltip)", "defaultValue": true },
+        { "type": "CHECKBOX", "id": "showLegend", "label": "Mostrar leyenda", "defaultValue": true },
         {
-          "type": "select",
+          "type": "SELECT_RADIO",
           "id": "legendPosition",
           "label": "Posición de la leyenda",
           "options": [
-            { "label": "Arriba izquierda", "value": "topleft" },
-            { "label": "Arriba derecha",  "value": "topright" },
-            { "label": "Abajo izquierda", "value": "bottomleft" },
-            { "label": "Abajo derecha",   "value": "bottomright" }
+            { "label": "Arriba izq.", "value": "topleft" },
+            { "label": "Arriba der.", "value": "topright" },
+            { "label": "Abajo izq.", "value": "bottomleft" },
+            { "label": "Abajo der.", "value": "bottomright" }
           ],
           "defaultValue": "bottomright"
         }
@@ -102,7 +128,7 @@
       "label": "Popup",
       "elements": [
         {
-          "type": "text",
+          "type": "TEXTINPUT",
           "id": "popupFormat",
           "label": "Formato (usa {{nombre}} y {{valor}})",
           "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
@@ -110,5 +136,6 @@
       ]
     }
   ],
-  "features": {}
+  "interactions": [{ "id": "filter", "supportedActions": ["FILTER"] }],
+  "features": { "enableComparisonDateRange": false }
 }
