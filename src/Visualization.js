@@ -38,8 +38,9 @@ function objectToTableShape(data) {
   }));
 
 // dentro de objectToTableShape
-  const rowsObj = Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : [];
-  const rows = rowsObj.map(rowObj =>
+    const rowsObj = Array.isArray(data?.tables?.DEFAULT?.rows)
+      ? data.tables.DEFAULT.rows
+    : (Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : []);  const rows = rowsObj.map(rowObj =>
     headers.map(h => {
       const v = rowObj?.[h.id];
       const cell = Array.isArray(v) ? v[0] : v;
@@ -83,6 +84,7 @@ function objectToTableShape(data) {
     }
 
     // --- Caja de diagnóstico ---
+    if (new URLSearchParams(location.search).has('diag')) {
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:999999;background:#000c;color:#fff;padding:8px 10px;border-radius:8px;font:12px system-ui;max-width:70vw;cursor:pointer';
     box.title = 'clic para cerrar';
@@ -96,6 +98,7 @@ function objectToTableShape(data) {
       'search(dec): ' + decQ.slice(0, 200)
     ].join('<br/>');
     document.body.appendChild(box);
+    }
   } catch (e) {
     console.warn('[Viz] No se pudo sanear query:', e);
   }
@@ -106,7 +109,8 @@ function objectToTableShape(data) {
 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import './styles.css';
+// import './styles.css';
+import './Visualization.css';
 
 // GeoJSON embebido (Vite: ?raw devuelve string)
 import geojsonText from './barrioscaba.geojson?raw';
