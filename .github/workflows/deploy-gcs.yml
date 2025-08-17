@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       prefix:
-        description: "Carpeta de destino (ej: barrios-caba-map-v2025)"
+        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025)"
         required: true
         default: "barrios-caba-map-v2025"
       version:
-        description: "Sufijo de versión (opcional, ej: m). Si está vacío, no agrega sufijo."
+        description: "Sufijo de versión (ej: m). Si está vacío, no agrega sufijo."
         required: false
         default: ""
       devMode:
@@ -16,13 +16,21 @@ on:
         required: false
         default: ""
       bucket:
-        description: "Nombre del bucket (sin gs://)"
+        description: "Bucket GCS (sin gs://)"
         required: true
         default: "mapa-barrios-degcba"
+      scheme:
+        description: "Esquema para resources (https|gs)"
+        required: false
+        default: "https"
+      configName:
+        description: "Nombre del config (normalizar a minúscula)"
+        required: false
+        default: "config.json"
 
 permissions:
   contents: read
-  id-token: write    # requerido para WIF
+  id-token: write   # requerido para Workload Identity Federation (auth@v2)
 
 jobs:
   deploy:
@@ -43,18 +51,30 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Prepara carpeta destino y actualiza manifest/rutas
+      # Normaliza a config.json en minúscula si vino como Config.json
+      - name: Ensure config.json lowercase
+        run: |
+          if [ -f public/Config.json ] && [ ! -f public/config.json ]; then
+            cp public/Config.json public/config.json
+          fi
+          test -f public/config.json
+
+      # Prepara carpeta destino y actualiza manifest/rutas (si falta arg, corta)
       - name: Prepare version
         run: |
-          if [ -n "${{ inputs.version }}" ] && [ -n "${{ inputs.devMode }}" ]; then
-            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --version "${{ inputs.version }}" --devMode "${{ inputs.devMode }}"
-          elif [ -n "${{ inputs.version }}" ]; then
-            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --version "${{ inputs.version }}"
-          elif [ -n "${{ inputs.devMode }}" ]; then
-            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --devMode "${{ inputs.devMode }}"
-          else
-            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}"
-          fi
+          set -e
+          ARGS=( --bucket "${{ inputs.bucket }}"
+                 --prefix "${{ inputs.prefix }}"
+                 --scheme "${{ inputs.scheme }}"
+                 --configName "${{ inputs.configName }}"
+                 --setIdToFolder "true"
+                 --manifestPath "public/manifest.json" )
+          if [ -n "${{ inputs.version }}" ]; then ARGS+=( --version "${{ inputs.version }}" ); fi
+          if [ -n "${{ inputs.devMode }}" ]; then ARGS+=( --devMode "${{ inputs.devMode }}" ); fi
+          echo "node scripts/prepare-version.mjs ${ARGS[*]}"
+          node scripts/prepare-version.mjs "${ARGS[@]}"
+          echo "==== manifest.json (result) ===="
+          cat public/manifest.json
 
       - name: Build (Vite)
         run: npm run build
@@ -82,7 +102,7 @@ jobs:
             echo "ℹ️ No se encontró 'subscribeToData' (puede estar minificado); seguimos"
           fi
 
-      # 🔐 AUTH con WIF (tu forma). Exportamos outputs para gsutil.
+      # 🔐 AUTH con WIF (tu forma). Exporta outputs para gsutil.
       - name: Auth to Google Cloud (WIF)
         id: auth
         uses: google-github-actions/auth@v2
@@ -90,7 +110,7 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
           project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_environment_variables: true   # expone GOOGLE_GHA_CREDS_PATH y más
+          export_environment_variables: true   # expone GOOGLE_GHA_CREDS_PATH / credentials_file_path
 
       - name: Setup gcloud (con gsutil)
         uses: google-github-actions/setup-gcloud@v2
@@ -115,8 +135,6 @@ jobs:
           echo "gcloud version:" && gcloud version
           echo "Auth list (con WIF puede salir vacío y es OK):" && gcloud auth list || true
           echo "Access token (recortado):" && gcloud auth print-access-token | head -c 20 && echo "..."
-          echo "List bucket (gcloud storage):"
-          gcloud storage buckets list --filter="name=projects/_/buckets/$B" || true
           echo "gsutil ls -b gs://$B:" && gsutil ls -b gs://$B
 
       # Armar FOLDER y BUCKET_PATH (sin depender de .bucket_path)
@@ -128,7 +146,7 @@ jobs:
           echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER" >> $GITHUB_ENV
           echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
 
-      # 🚀 Deploy con gsutil (usa ADC por env override). Todo no-cache y tipos correctos.
+      # 🚀 Deploy con gsutil (usa ADC por env override). No-store + tipos correctos.
       - name: Deploy to GCS
         run: |
           set -e
@@ -152,7 +170,7 @@ jobs:
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
             cp public/manifest.json "$BUCKET_PATH/manifest.json"
 
-          # Estáticos opcionales (sin cache también para simplificar)
+          # Estáticos opcionales (no-store para simplificar pruebas)
           if [ -f public/Icon.png ]; then
             gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
               cp public/Icon.png "$BUCKET_PATH/Icon.png"
