@@ -84,7 +84,8 @@ function objectToTableShape(data) {
     }
 
     // --- Caja de diagnóstico ---
-    if (new URLSearchParams(location.search).has('diag')) {
+ // --- Caja de diagnóstico (solo si ?diag=1) ---
+  if (new URLSearchParams(location.search).has('diag')) {
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:999999;background:#000c;color:#fff;padding:8px 10px;border-radius:8px;font:12px system-ui;max-width:70vw;cursor:pointer';
     box.title = 'clic para cerrar';
@@ -98,14 +99,9 @@ function objectToTableShape(data) {
       'search(dec): ' + decQ.slice(0, 200)
     ].join('<br/>');
     document.body.appendChild(box);
-    }
-  } catch (e) {
-    console.warn('[Viz] No se pudo sanear query:', e);
   }
-})();
-
-// src/Visualization.js
-// Community Viz 2025 — Leaflet (sin fetch) + Vite + dscc.objectTransform
+  // src/Visualization.js
+  // Community Viz 2025 — Leaflet (sin fetch) + Vite + dscc.objectTransform
 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
