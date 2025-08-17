@@ -215,10 +215,6 @@ function readStyle(message = {}) {
     return Number.isFinite(n) ? n : d;
   };
 
-  const num = (x, d) => {
-    const n = Number(x);
-    return Number.isFinite(n) ? n : d;
-  };
 
   return {
     nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
