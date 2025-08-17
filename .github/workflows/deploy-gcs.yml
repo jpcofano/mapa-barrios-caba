@@ -1,4 +1,4 @@
-name: Build & Deploy Community
+name: Build & Deploy Community Viz
 
 on:
   workflow_dispatch:
@@ -125,42 +125,6 @@ jobs:
           echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=${{ steps.auth.outputs.credentials_file_path }}" >> $GITHUB_ENV
 
       # 👀 Sanity check (gcloud usa ADC/WIF; gsutil también por override)
-      - name: Verify WIF in use
-        shell: bash
-        env:
-          CREDS: ${{ steps.auth.outputs.credentials_file_path }}
-          SA: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          BUCKET: ${{ env.BUCKET }}
-        run: |
-          set -euo pipefail
-      
-          echo "== Check 1: credentials file exported =="
-          echo "GOOGLE_APPLICATION_CREDENTIALS=${{GOOGLE_APPLICATION_CREDENTIALS:-unset}}"
-          echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=${{CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE:-unset}}"
-          test -f "$CREDS" || (echo "No existe $CREDS" && exit 1)
-      
-          echo "== Check 2: credential type must be external_account (WIF) =="
-          if command -v jq >/dev/null 2>&1; then
-            TYPE=$(jq -r '.type' "$CREDS")
-            AUD=$(jq -r '.audience' "$CREDS" || echo "")
-          else
-            TYPE=$(grep -o '"type" *: *"[^"]*"' "$CREDS" | head -n1 | sed -E 's/.*"type" *: *"([^"]*)".*/\1/')
-            AUD=$(grep -o '"audience" *: *"[^"]*"' "$CREDS" | head -n1 | sed -E 's/.*"audience" *: *"([^"]*)".*/\1/')
-          fi
-          echo "type=$TYPE"
-          echo "audience=$AUD"
-          [ "$TYPE" = "external_account" ] || (echo "ERROR: type != external_account" && exit 1)
-      
-          echo "== Check 3: gcloud active account =="
-          ACTIVE=$(gcloud --quiet config get-value account)
-          echo "ACTIVE=$ACTIVE"
-          echo "EXPECTED=$SA"
-          [ "$ACTIVE" = "$SA" ] || (echo "ERROR: account activo ($ACTIVE) != SA ($SA)" && exit 1)
-      
-          echo "== Check 4: gsutil using ADC =="
-          if [ -z "${{BUCKET:-}}" ]; then BUCKET="gs://mapa-barrios-degcba"; fi
-          gsutil -D ls "$BUCKET" 2>&1 | sed -n '1,120p' | sed 's/Authorization:.*$/Authorization: <redacted>/g'
-          echo "OK: WIF verificado"
       - name: Auth & Bucket check
         env:
           B: ${{ inputs.bucket }}
