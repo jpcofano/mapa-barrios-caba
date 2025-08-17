@@ -1,6 +1,10 @@
 // NUEVO: trae la API desde el paquete
 // Bundlea la lib de DSCC en tu Visualization.js
 import * as dscc from '@google/dscc';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import './Visualization.css';
+import geojsonText from './barrioscaba.geojson?raw';
 
 // Alias estable: garantiza que el símbolo exista en el bundle y podamos referenciarlo con seguridad
 const dsccModule = dscc;
@@ -40,7 +44,8 @@ function objectToTableShape(data) {
 // dentro de objectToTableShape
     const rowsObj = Array.isArray(data?.tables?.DEFAULT?.rows)
       ? data.tables.DEFAULT.rows
-    : (Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : []);  const rows = rowsObj.map(rowObj =>
+    : (Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : []);
+  const rows = rowsObj.map(rowObj =>
     headers.map(h => {
       const v = rowObj?.[h.id];
       const cell = Array.isArray(v) ? v[0] : v;
@@ -101,15 +106,14 @@ function objectToTableShape(data) {
     document.body.appendChild(box);
   }
   // src/Visualization.js
+  } catch (e) { console.error('[Viz] Sanitizador URL error:', e); }
+})();
+
   // Community Viz 2025 — Leaflet (sin fetch) + Vite + dscc.objectTransform
 
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 // import './styles.css';
-import './Visualization.css';
 
 // GeoJSON embebido (Vite: ?raw devuelve string)
-import geojsonText from './barrioscaba.geojson?raw';
 let GEOJSON;
 try {
   GEOJSON = JSON.parse(geojsonText);
