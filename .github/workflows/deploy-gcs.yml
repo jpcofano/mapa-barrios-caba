@@ -1,10 +1,8 @@
-# .github/workflows/deploy-gcs.yml
 name: Deploy to GCS
 
 on:
   workflow_dispatch:
     inputs:
-      # Requeridos (vos pasás estos con gh workflow run)
       prefix:
         description: "Carpeta base (ej: barrios-caba-map-v2025)"
         required: true
@@ -18,7 +16,6 @@ on:
         required: true
         default: "false"
 
-      # Opcionales (quedan con defaults si no los pasás)
       bucket:
         description: "Bucket GCS"
         required: true
@@ -49,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # queda por compatibilidad
+      id-token: write
 
     steps:
       - name: Checkout
@@ -66,13 +63,28 @@ jobs:
       - name: Build (si aplica)
         run: npm run build --if-present
 
-      # 🔐 Login clásico con Service Account (lo que ya venías usando)
+      # 🔐 Login clásico con Service Account (clave JSON en secret)
       - name: Setup gcloud + gsutil (classic SA key)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de tu SA (ci-deploy@…)
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
           export_default_credentials: true
           project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      # 👀 Sanity check de auth y bucket
+      - name: Auth & Bucket check
+        env:
+          B: ${{ github.event.inputs.bucket }}
+        run: |
+          set -e
+          echo "gcloud version:"
+          gcloud version
+          echo "Auth list:"
+          gcloud auth list
+          echo "Whoami (should be your SA):"
+          gcloud config get-value account
+          echo "List bucket:"
+          gsutil ls -b gs://$B
 
       - name: Compute vars
         id: vars
@@ -80,7 +92,7 @@ jobs:
           echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
           echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # 🔧 PREPARE: pasar flags en UNA SOLA LÍNEA (sin =) y también por ENV (fallback)
+      # 🔧 Prepare manifest/resources (flags en una sola línea + ENV fallback)
       - name: Prepare manifest/resources
         env:
           BUCKET:  ${{ github.event.inputs.bucket }}
@@ -94,6 +106,7 @@ jobs:
         run: node scripts/prepare-version.mjs --bucket "${{ github.event.inputs.bucket }}" --prefix "${{ github.event.inputs.prefix }}" --version "${{ github.event.inputs.version }}" --devMode "${{ github.event.inputs.devMode }}" --scheme "${{ github.event.inputs.scheme }}" --configName "${{ github.event.inputs.configName }}" --setIdToFolder "${{ github.event.inputs.setIdToFolder }}" --manifestPath public/manifest.json && echo "==== manifest.json (result) ====" && cat public/manifest.json
         shell: bash
 
+      # 🚀 Upload con guardas y echo del destino
       - name: Upload to GCS (core files + estáticos)
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
@@ -101,6 +114,21 @@ jobs:
           CFG: ${{ github.event.inputs.configName }}
         run: |
           set -e
+
+          echo "Destino: gs://$B/$V"
+          # Guardas: si B o V vienen vacíos, fallar acá (no llegar a gsutil cp)
+          [ -n "$B" ] || { echo "ERROR: BUCKET vacío"; exit 2; }
+          [ -n "$V" ] || { echo "ERROR: FOLDER vacío"; exit 3; }
+
+          echo "Cuenta activa:"
+          gcloud config get-value account
+
+          echo "Verificando acceso de escritura en bucket…"
+          gsutil ls -b gs://$B >/dev/null
+
+          # Crear carpeta "lógica" con un marcador (no obligatorio, pero deja claro el path)
+          echo "touch marker"
+          echo "$(date -u) by GH Actions" | gsutil -h "Cache-Control:no-store" cp - gs://$B/$V/.gh-actions-ok.txt
 
           test -f public/manifest.json
 
