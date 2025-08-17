@@ -1,9 +1,10 @@
+# .github/workflows/deploy-gcs.yml
 name: Deploy to GCS
 
 on:
   workflow_dispatch:
     inputs:
-      # Requeridos
+      # Requeridos (vos pasás estos con gh workflow run)
       prefix:
         description: "Carpeta base (ej: barrios-caba-map-v2025)"
         required: true
@@ -17,13 +18,13 @@ on:
         required: true
         default: "false"
 
-      # Opcionales
+      # Opcionales (quedan con defaults si no los pasás)
       bucket:
         description: "Bucket GCS"
         required: true
         default: "mapa-barrios-degcba"
       scheme:
-        description: "Esquema de resources (https|gs)"
+        description: "Esquema para resource (https|gs)"
         required: true
         default: "https"
       configName:
@@ -65,13 +66,13 @@ jobs:
       - name: Build (si aplica)
         run: npm run build --if-present
 
-      # 🔐 LOGIN clásico con service account key (tu forma anterior)
+      # 🔐 Login clásico con Service Account (lo que ya venías usando)
       - name: Setup gcloud + gsutil (classic SA key)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de la SA (ci-deploy@…)
+          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de tu SA (ci-deploy@…)
           export_default_credentials: true
-          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional si la SA ya fija el proyecto
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Compute vars
         id: vars
@@ -79,12 +80,7 @@ jobs:
           echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
           echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # (Opcional) Debug argv que recibe Node
-      - name: Debug args to Node
-        run: node -e "console.log('argv=', process.argv.slice(2))" -- --bucket="${{ github.event.inputs.bucket }}" --prefix="${{ github.event.inputs.prefix }}" --version="${{ github.event.inputs.version }}" --devMode="${{ github.event.inputs.devMode }}" --scheme="${{ github.event.inputs.scheme }}" --configName="${{ github.event.inputs.configName }}" --setIdToFolder="${{ github.event.inputs.setIdToFolder }}" --manifestPath="public/manifest.json"
-        shell: bash
-
-      # 🔧 PREPARE: flags en UNA LÍNEA (robusto) + ENV fallback por si algo falla
+      # 🔧 PREPARE: pasar flags en UNA SOLA LÍNEA (sin =) y también por ENV (fallback)
       - name: Prepare manifest/resources
         env:
           BUCKET:  ${{ github.event.inputs.bucket }}
@@ -95,7 +91,7 @@ jobs:
           CONFIGNAME:   ${{ github.event.inputs.configName }}
           SETIDTOFOLDER: ${{ github.event.inputs.setIdToFolder }}
           MANIFESTPATH: public/manifest.json
-        run: node scripts/prepare-version.mjs --bucket="${{ github.event.inputs.bucket }}" --prefix="${{ github.event.inputs.prefix }}" --version="${{ github.event.inputs.version }}" --devMode="${{ github.event.inputs.devMode }}" --scheme="${{ github.event.inputs.scheme }}" --configName="${{ github.event.inputs.configName }}" --setIdToFolder="${{ github.event.inputs.setIdToFolder }}" --manifestPath="public/manifest.json" && echo "==== manifest.json (result) ====" && cat public/manifest.json
+        run: node scripts/prepare-version.mjs --bucket "${{ github.event.inputs.bucket }}" --prefix "${{ github.event.inputs.prefix }}" --version "${{ github.event.inputs.version }}" --devMode "${{ github.event.inputs.devMode }}" --scheme "${{ github.event.inputs.scheme }}" --configName "${{ github.event.inputs.configName }}" --setIdToFolder "${{ github.event.inputs.setIdToFolder }}" --manifestPath public/manifest.json && echo "==== manifest.json (result) ====" && cat public/manifest.json
         shell: bash
 
       - name: Upload to GCS (core files + estáticos)
@@ -108,14 +104,14 @@ jobs:
 
           test -f public/manifest.json
 
-          # manifest y config con no-store
+          # manifest y config (sin cache)
           gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
             cp public/manifest.json gs://$B/$V/manifest.json
 
           gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
             cp public/$CFG gs://$B/$V/$CFG
 
-          # JS/CSS (no-store mientras iterás)
+          # JS/CSS (sin cache mientras iterás)
           if [ -f "dist/Visualization.js" ]; then
             gsutil -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
               cp dist/Visualization.js gs://$B/$V/Visualization.js
@@ -144,8 +140,7 @@ jobs:
         if: ${{ github.event.inputs.setIamPublic == 'true' }}
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
-        run: |
-          gsutil iam ch allUsers:objectViewer gs://$B
+        run: gsutil iam ch allUsers:objectViewer gs://$B
 
       - name: (Opcional) Aplicar CORS desde cors.json del repo
         if: ${{ github.event.inputs.applyCors == 'true' }}
