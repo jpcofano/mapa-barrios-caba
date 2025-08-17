@@ -1,18 +1,8 @@
-[
+﻿[
   {
-    "origin": [
-      "https://lookerstudio.google.com",
-      "https://datastudio.google.com",
-      "https://storage.googleapis.com/",
-      "https://lookerstudio.googleusercontent.com/",
-      "*"
-    ],
-    "responseHeader": [
-      "Content-Type",
-      "Cache-Control",
-      "Content-Length"
-    ],
-    "method": ["GET", "HEAD", "OPTIONS"],
-    "maxAgeSeconds": 86400
+    "origin": ["https://lookerstudio.google.com","https://datastudio.google.com"],
+    "method": ["GET"],
+    "responseHeader": ["Content-Type","Cache-Control"],
+    "maxAgeSeconds": 3600
   }
 ]
