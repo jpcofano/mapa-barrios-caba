@@ -179,9 +179,22 @@ const PRESET_PALETTES = {
 };
 
 // ---------------------- Lectura de estilo (moderno) ----------------------
+// ---------------------- Lectura de estilo (moderno) ----------------------
 function readStyle(message = {}) {
   const s = (message && message.styleById) ? message.styleById : {};
 
+  const getPalette = () => {
+    // 1) Paleta manual (lista de hex separados por coma)
+    const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
+    if (raw) {
+      const colors = raw.split(',')
+        .map(x => x.trim())
+        .filter(x => /^#?[0-9a-f]{6}$/i.test(x))
+        .map(x => x.startsWith('#') ? x : '#' + x);
+      if (colors.length) return { mode: 'custom', colors };
+    }
+
+    // 2) Selector "Paleta predefinida (categórica)" o un único color
     const v = s.colorPalette && s.colorPalette.value;
     if (v) {
       if (typeof v === 'string') {
@@ -189,14 +202,38 @@ function readStyle(message = {}) {
         if (/^#?[0-9a-f]{6}$/i.test(v)) {
           return { mode: 'custom', colors: [ v.startsWith('#') ? v : ('#' + v) ] };
         }
-        return { mode: 'custom', colors: [] }; // fallback si la string no es hex ni preset
+        return { mode: 'custom', colors: [] };
       }
       const colors = (v.colors || v.palette || v.values || []);
       return { mode: (v.mode || 'custom'), colors: Array.isArray(colors) ? colors : [] };
     }
     return null;
-
   };
+
+  const num = (x, d) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : d;
+  };
+
+  return {
+    nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
+    geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
+    colorScale: (s.colorScale && s.colorScale.value) || 'greenToRed',
+    invertScale: !!(s.invertScale && s.invertScale.value),
+    showLabels: !!(s.showLabels && s.showLabels.value),
+    showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
+    legendPosition: (s.legendPosition && s.legendPosition.value) || 'bottomright',
+    showBorders: (s.showBorders && s.showBorders.value !== undefined) ? !!s.showBorders.value : true,
+    borderColor: (s.borderColor && s.borderColor.value && s.borderColor.value.color) || '#000000',
+    borderWidth: num(s.borderWidth && s.borderWidth.value, 1),
+    borderOpacity: num(s.borderOpacity && s.borderOpacity.value, 1),
+    opacity: num(s.opacity && s.opacity.value, 0.45),
+    colorMissing: (s.colorMissing && s.colorMissing.value && s.colorMissing.value.color) || '#cccccc',
+    popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
+    colorPalette: getPalette(),
+  };
+}
+
 
   const num = (x, d) => {
     const n = Number(x);
