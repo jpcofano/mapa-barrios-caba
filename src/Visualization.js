@@ -105,7 +105,7 @@ function objectToTableShape(data) {
 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-// import './styles.css';
+import './styles.css';
 import './Visualization.css';
 
 // GeoJSON embebido (Vite: ?raw devuelve string)

@@ -1,4 +1,4 @@
-name: Build & Deploy Community Viz
+name: Build & Deploy Community
 
 on:
   workflow_dispatch:
