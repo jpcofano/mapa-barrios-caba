@@ -6,100 +6,153 @@
       "elements": [
         {
           "id": "geoDimension",
-          "label": "ID del polígono (Geo/Texto)",
+          "label": "Dimensión de Texto (GeoJSON ID)",
           "type": "DIMENSION",
-          "options": {
-            "min": 1,
-            "max": 1,
-            "supportedTypes": ["TEXT"]
-          }
+          "options": { "min": 1, "max": 1, "supportedTypes": ["DEFAULT"] }
         },
         {
           "id": "metricPrimary",
-          "label": "Métrica principal (coropleta)",
+          "label": "Métrica Principal",
           "type": "METRIC",
-          "options": {
-            "min": 1,
-            "max": 1
-          }
+          "options": { "min": 1, "max": 1 }
         }
       ]
     }
   ],
   "style": [
     {
-      "id": "mapSetup",
-      "label": "Ajustes del mapa",
+      "id": "geojsonSettings",
+      "label": "Configuración de GeoJSON",
       "elements": [
-        { "type": "CHECKBOX", "id": "fitToData", "label": "Ajustar vista a los datos" },
-        { "type": "CHECKBOX", "id": "showGraticule", "label": "Mostrar retícula" }
+        {
+          "id": "nivelJerarquia",
+          "label": "Nivel (barrio/comuna)",
+          "type": "SELECT_SINGLE",
+          "defaultValue": "barrio",
+          "options": [
+            { "label": "Barrio", "value": "barrio" },
+            { "label": "Comuna", "value": "comuna" }
+          ]
+        },
+        {
+          "id": "geojsonProperty",
+          "label": "Propiedad del GeoJSON a Coincidir",
+          "type": "TEXTINPUT",
+          "defaultValue": ""
+        }
       ]
     },
     {
-      "id": "paint",
-      "label": "Relleno (coropleta)",
+      "id": "coloring",
+      "label": "Colorización",
       "elements": [
-        { "type": "FILL_COLOR", "id": "colorMin", "label": "Color mínimo" },
-        { "type": "FILL_COLOR", "id": "colorMid", "label": "Color medio" },
-        { "type": "FILL_COLOR", "id": "colorMax", "label": "Color máximo" },
-        { "type": "FILL_COLOR", "id": "colorNoData", "label": "Color sin datos" },
-        { "type": "OPACITY", "id": "fillOpacity", "label": "Opacidad del relleno" }
+        {
+          "id": "colorScale",
+          "label": "Escala",
+          "type": "SELECT_SINGLE",
+          "defaultValue": "greenToRed",
+          "options": [
+            { "label": "Green → Red", "value": "greenToRed" },
+            { "label": "Blue → Yellow", "value": "blueToYellow" },
+            { "label": "Grayscale", "value": "grayscale" },
+            { "label": "Yellow", "value": "yellow" }
+          ]
+        },
+        {
+          "id": "invertScale",
+          "label": "Invertir escala",
+          "type": "CHECKBOX",
+          "defaultValue": false
+        },
+        {
+          "id": "customPalette",
+          "label": "Paleta personalizada (hex separados por coma)",
+          "type": "TEXTINPUT",
+          "defaultValue": ""
+        },
+        {
+          "id": "opacity",
+          "label": "Opacidad del relleno",
+          "type": "OPACITY",
+          "defaultValue": 0.5
+        }
       ]
     },
     {
       "id": "borders",
       "label": "Bordes",
       "elements": [
-        { "type": "LINE_COLOR", "id": "strokeColor", "label": "Color del borde" },
         {
-          "type": "NUMBER",
-          "id": "strokeWidth",
-          "label": "Ancho del borde (px)",
-          "options": { "min": 0, "max": 10 }
+          "id": "showBorders",
+          "label": "Mostrar bordes",
+          "type": "CHECKBOX",
+          "defaultValue": true
+        },
+        {
+          "id": "borderColor",
+          "label": "Color del borde",
+          "type": "BORDER_COLOR",
+          "defaultValue": { "color": "#000000" }
+        },
+        {
+          "id": "borderWidth",
+          "label": "Grosor del borde",
+          "type": "LINE_WEIGHT",
+          "defaultValue": 1
+        },
+        {
+          "id": "borderOpacity",
+          "label": "Opacidad del borde",
+          "type": "OPACITY",
+          "defaultValue": 1
         }
       ]
     },
     {
-      "id": "labelsLegend",
+      "id": "legendStyle",
       "label": "Leyenda y etiquetas",
       "elements": [
-        { "type": "CHECKBOX", "id": "showLegend", "label": "Mostrar leyenda" },
         {
-          "type": "SELECT_SINGLE",
+          "id": "showLegend",
+          "label": "Mostrar leyenda",
+          "type": "CHECKBOX",
+          "defaultValue": true
+        },
+        {
           "id": "legendPosition",
           "label": "Posición de la leyenda",
-          "options": {
-            "options": [
-              { "label": "Auto", "value": "auto" },
-              { "label": "Arriba", "value": "top" },
-              { "label": "Abajo", "value": "bottom" },
-              { "label": "Izquierda", "value": "left" },
-              { "label": "Derecha", "value": "right" }
-            ]
-          }
+          "type": "SELECT_SINGLE",
+          "defaultValue": "bottomright",
+          "options": [
+            { "label": "Arriba Izquierda", "value": "topleft" },
+            { "label": "Arriba Derecha", "value": "topright" },
+            { "label": "Abajo Izquierda", "value": "bottomleft" },
+            { "label": "Abajo Derecha", "value": "bottomright" }
+          ]
         },
-        { "type": "CHECKBOX", "id": "showLabels", "label": "Mostrar etiquetas" },
-        { "type": "FONT_COLOR", "id": "labelColor", "label": "Color de etiquetas" }
+        {
+          "id": "showLabels",
+          "label": "Mostrar etiquetas",
+          "type": "CHECKBOX",
+          "defaultValue": false
+        }
       ]
     },
     {
-      "id": "popup",
-      "label": "Tooltip / Popup",
+      "id": "miscSettings",
+      "label": "Adicional",
       "elements": [
-        { "type": "CHECKBOX", "id": "enableTooltip", "label": "Habilitar tooltip al pasar" },
         {
-          "type": "SELECT_SINGLE",
-          "id": "valueFormat",
-          "label": "Formato de valores",
-          "options": {
-            "options": [
-              { "label": "Auto", "value": "auto" },
-              { "label": "Entero", "value": "int" },
-              { "label": "1 decimal", "value": "d1" },
-              { "label": "2 decimales", "value": "d2" },
-              { "label": "Porcentaje", "value": "pct" }
-            ]
-          }
+          "id": "colorMissing",
+          "label": "Color sin dato",
+          "type": "FILL_COLOR",
+          "defaultValue": { "color": "#cccccc" }
+        },
+        {
+          "id": "popupFormat",
+          "label": "Formato del popup",
+          "type": "TEXTINPUT",
+          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
         }
       ]
     }
