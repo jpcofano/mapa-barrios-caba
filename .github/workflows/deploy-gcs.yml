@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write  # requerido por WIF
 
     steps:
       - name: Checkout
@@ -63,28 +63,41 @@ jobs:
       - name: Build (si aplica)
         run: npm run build --if-present
 
-      # 🔐 Login clásico con Service Account (clave JSON en secret)
-      - name: Setup gcloud + gsutil (classic SA key)
+      # 🔐 AUTH con WIF (tu forma). Guardamos outputs.
+      - name: Auth to Google Cloud (WIF)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_environment_variables: true  # expone GOOGLE_GHA_CREDS_PATH, etc.
+
+      - name: Setup gcloud (with gsutil)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+          install_components: gsutil
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      # 👀 Sanity check de auth y bucket
+      # 👀 Sanity check de identidad y acceso
       - name: Auth & Bucket check
         env:
           B: ${{ github.event.inputs.bucket }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -e
-          echo "gcloud version:"
-          gcloud version
-          echo "Auth list:"
-          gcloud auth list
-          echo "Whoami (should be your SA):"
-          gcloud config get-value account
-          echo "List bucket:"
-          gsutil ls -b gs://$B
+          echo "ADC file: $GOOGLE_APPLICATION_CREDENTIALS"
+          test -f "$GOOGLE_APPLICATION_CREDENTIALS" || { echo "No existe ADC file"; exit 10; }
+
+          echo "gcloud version:" && gcloud version
+          echo "Auth list (puede salir vacío con WIF y es OK):" && gcloud auth list || true
+          echo "Print access token (probar WIF):"
+          gcloud auth print-access-token | head -c 20 && echo "..."
+
+          echo "List bucket con gcloud storage:"
+          gcloud storage buckets list --filter="name=projects/_/buckets/$B" || true
+          echo "Head bucket con gcloud storage:"
+          gcloud storage buckets describe gs://$B --format="yaml(name,location)" || true
 
       - name: Compute vars
         id: vars
@@ -92,7 +105,7 @@ jobs:
           echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
           echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # 🔧 Prepare manifest/resources (flags en una sola línea + ENV fallback)
+      # 🔧 PREPARE manifest/resources (flags con espacios) + ENV fallback
       - name: Prepare manifest/resources
         env:
           BUCKET:  ${{ github.event.inputs.bucket }}
@@ -106,77 +119,64 @@ jobs:
         run: node scripts/prepare-version.mjs --bucket "${{ github.event.inputs.bucket }}" --prefix "${{ github.event.inputs.prefix }}" --version "${{ github.event.inputs.version }}" --devMode "${{ github.event.inputs.devMode }}" --scheme "${{ github.event.inputs.scheme }}" --configName "${{ github.event.inputs.configName }}" --setIdToFolder "${{ github.event.inputs.setIdToFolder }}" --manifestPath public/manifest.json && echo "==== manifest.json (result) ====" && cat public/manifest.json
         shell: bash
 
-      # 🚀 Upload con guardas y echo del destino
+      # 🚀 Upload usando gcloud storage (toma WIF/ADC sin sorpresas)
       - name: Upload to GCS (core files + estáticos)
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
           V: ${{ steps.vars.outputs.FOLDER }}
           CFG: ${{ github.event.inputs.configName }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           set -e
-
           echo "Destino: gs://$B/$V"
-          # Guardas: si B o V vienen vacíos, fallar acá (no llegar a gsutil cp)
           [ -n "$B" ] || { echo "ERROR: BUCKET vacío"; exit 2; }
           [ -n "$V" ] || { echo "ERROR: FOLDER vacío"; exit 3; }
-
-          echo "Cuenta activa:"
-          gcloud config get-value account
-
-          echo "Verificando acceso de escritura en bucket…"
-          gsutil ls -b gs://$B >/dev/null
-
-          # Crear carpeta "lógica" con un marcador (no obligatorio, pero deja claro el path)
-          echo "touch marker"
-          echo "$(date -u) by GH Actions" | gsutil -h "Cache-Control:no-store" cp - gs://$B/$V/.gh-actions-ok.txt
-
           test -f public/manifest.json
 
-          # manifest y config (sin cache)
-          gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/manifest.json gs://$B/$V/manifest.json
+          # Subir archivos
+          gcloud storage cp public/manifest.json        gs://$B/$V/manifest.json
+          gcloud storage cp public/$CFG                 gs://$B/$V/$CFG || true
 
-          gsutil -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/$CFG gs://$B/$V/$CFG
-
-          # JS/CSS (sin cache mientras iterás)
           if [ -f "dist/Visualization.js" ]; then
-            gsutil -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-              cp dist/Visualization.js gs://$B/$V/Visualization.js
+            gcloud storage cp dist/Visualization.js     gs://$B/$V/Visualization.js
           elif [ -f "public/Visualization.js" ]; then
-            gsutil -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-              cp public/Visualization.js gs://$B/$V/Visualization.js
+            gcloud storage cp public/Visualization.js   gs://$B/$V/Visualization.js
           fi
 
           if [ -f "dist/Visualization.css" ]; then
-            gsutil -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-              cp dist/Visualization.css gs://$B/$V/Visualization.css
+            gcloud storage cp dist/Visualization.css    gs://$B/$V/Visualization.css
           elif [ -f "public/Visualization.css" ]; then
-            gsutil -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-              cp public/Visualization.css gs://$B/$V/Visualization.css
+            gcloud storage cp public/Visualization.css  gs://$B/$V/Visualization.css
           fi
 
-          # Estáticos opcionales (cache largo)
+          # Estáticos opcionales
           for f in Icon.png Logo.png package.html privacy.html support.html barrioscaba.geojson barrioscaba.js; do
             if [ -f "public/$f" ]; then
-              gsutil -h "Cache-Control:public, max-age=31536000, immutable" \
-                cp public/$f gs://$B/$V/$f || true
+              gcloud storage cp public/$f gs://$B/$V/$f || true
             fi
           done
+
+          # Metadatos (cache/control y content-type)
+          gcloud storage objects update gs://$B/$V/manifest.json         --cache-control="no-store" --content-type="application/json"
+          gcloud storage objects update gs://$B/$V/$CFG                  --cache-control="no-store" --content-type="application/json" || true
+          gcloud storage objects update gs://$B/$V/Visualization.js      --cache-control="no-store" --content-type="application/javascript" || true
+          gcloud storage objects update gs://$B/$V/Visualization.css     --cache-control="no-store" --content-type="text/css" || true
 
       - name: (Opcional) Bucket público por IAM
         if: ${{ github.event.inputs.setIamPublic == 'true' }}
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
-        run: gsutil iam ch allUsers:objectViewer gs://$B
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+        run: gcloud storage buckets add-iam-policy-binding gs://$B --member="allUsers" --role="roles/storage.objectViewer"
 
       - name: (Opcional) Aplicar CORS desde cors.json del repo
         if: ${{ github.event.inputs.applyCors == 'true' }}
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           if [ -f "cors.json" ]; then
-            gsutil cors set cors.json gs://$B
+            gcloud storage buckets update gs://$B --cors-file=cors.json
           else
             echo "cors.json no encontrado, omito"
           fi
@@ -185,11 +185,10 @@ jobs:
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
           V: ${{ steps.vars.outputs.FOLDER }}
-          CFG: ${{ github.event.inputs.configName }}
         run: |
           for u in \
             "https://storage.googleapis.com/$B/$V/manifest.json" \
-            "https://storage.googleapis.com/$B/$V/$CFG" \
+            "https://storage.googleapis.com/$B/$V/config.json" \
             "https://storage.googleapis.com/$B/$V/Visualization.js" \
             "https://storage.googleapis.com/$B/$V/Visualization.css"
           do
@@ -201,7 +200,7 @@ jobs:
       - name: Output URLs
         env:
           B: ${{ steps.vars.outputs.BUCKET }}
-          V: ${{ steps.vars.outputs.FOLDER }}
+          V: ${{ steps.vars.outputs.FOLDER }
         run: |
           echo "Manifest:  https://storage.googleapis.com/$B/$V/manifest.json"
           echo "Package:   https://storage.googleapis.com/$B/$V/"
