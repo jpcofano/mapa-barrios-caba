@@ -4,21 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       prefix:
-        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025)"
+        description: "Carpeta de destino (ej: barrios-caba-map-v2025)"
         required: true
         default: "barrios-caba-map-v2025"
       version:
-        description: "Sufijo de versión (opcional, ej: e)"
+        description: "Sufijo de versión (opcional, ej: m). Si está vacío, no agrega sufijo."
         required: false
         default: ""
       devMode:
         description: "Forzar devMode en manifest (true|false, opcional)"
         required: false
         default: ""
+      bucket:
+        description: "Nombre del bucket (sin gs://)"
+        required: true
+        default: "mapa-barrios-degcba"
 
 permissions:
   contents: read
-  id-token: write   # necesario para OIDC (auth@v2)
+  id-token: write    # requerido para WIF
 
 jobs:
   deploy:
@@ -43,13 +47,13 @@ jobs:
       - name: Prepare version
         run: |
           if [ -n "${{ inputs.version }}" ] && [ -n "${{ inputs.devMode }}" ]; then
-            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --version="${{ inputs.version }}" --devMode="${{ inputs.devMode }}"
+            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --version "${{ inputs.version }}" --devMode "${{ inputs.devMode }}"
           elif [ -n "${{ inputs.version }}" ]; then
-            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --version="${{ inputs.version }}"
+            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --version "${{ inputs.version }}"
           elif [ -n "${{ inputs.devMode }}" ]; then
-            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}" --devMode="${{ inputs.devMode }}"
+            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}" --devMode "${{ inputs.devMode }}"
           else
-            node scripts/prepare-version.mjs --prefix="${{ inputs.prefix }}"
+            node scripts/prepare-version.mjs --prefix "${{ inputs.prefix }}"
           fi
 
       - name: Build (Vite)
@@ -63,7 +67,7 @@ jobs:
         run: |
           node -e "const s=require('fs').readFileSync('public/manifest.json','utf8');if(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/.test(s)){console.error('NBSP/zero-width detectado en manifest.json');process.exit(1)}"
 
-      # Assert single bundle y (heurística) dscc en bundle
+      # Assert single bundle
       - name: Assert single bundle (no dynamic import)
         run: |
           test -f dist/Visualization.js
@@ -72,46 +76,102 @@ jobs:
           else
             echo "✅ Sin import() dinámicos"
           fi
-          ls -la dist
           if grep -qi "subscribeToData" dist/Visualization.js; then
             echo "✅ dscc parece bundleado (subscribeToData detectado)"
           else
             echo "ℹ️ No se encontró 'subscribeToData' (puede estar minificado); seguimos"
           fi
 
-      - name: Export BUCKET_PATH
-        run: echo "BUCKET_PATH=$(cat .bucket_path)" >> $GITHUB_ENV
-
-      # Auth GCP por OIDC (usar Workload Identity Federation)
-      # - name: Auth to Google Cloud (OIDC)
-      #   uses: google-github-actions/auth@v2
-      #   with:
-      #     workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-      #     service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-
-      # - name: Setup gcloud
-      #   uses: google-github-actions/setup-gcloud@v2
-      #   with:
-      #     project_id: ${{ secrets.GCP_PROJECT_ID }}
-      #     install_components: gsutil
-
-      - uses: google-github-actions/auth@v2
+      # 🔐 AUTH con WIF (tu forma). Exportamos outputs para gsutil.
+      - name: Auth to Google Cloud (WIF)
+        id: auth
+        uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/842577696066/locations/global/workloadIdentityPools/github-pool/providers/<TU-PROVIDER>
-          service_account: ci-deploy@mimetic-union-469017-f3.iam.gserviceaccount.com
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_environment_variables: true   # expone GOOGLE_GHA_CREDS_PATH y más
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - name: Setup gcloud (con gsutil)
+        uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: mimetic-union-469017-f3
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          install_components: gsutil
 
+      # Forzar que gsutil use las credenciales de WIF (evita 401 Anonymous)
+      - name: Export ADC env for gsutil
+        run: |
+          echo "GOOGLE_APPLICATION_CREDENTIALS=${{ steps.auth.outputs.credentials_file_path }}" >> $GITHUB_ENV
+          echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=${{ steps.auth.outputs.credentials_file_path }}" >> $GITHUB_ENV
+
+      # 👀 Sanity check (gcloud usa ADC/WIF; gsutil también por override)
+      - name: Auth & Bucket check
+        env:
+          B: ${{ inputs.bucket }}
+        run: |
+          set -e
+          echo "ADC file: $GOOGLE_APPLICATION_CREDENTIALS"
+          test -f "$GOOGLE_APPLICATION_CREDENTIALS"
+          echo "gcloud version:" && gcloud version
+          echo "Auth list (con WIF puede salir vacío y es OK):" && gcloud auth list || true
+          echo "Access token (recortado):" && gcloud auth print-access-token | head -c 20 && echo "..."
+          echo "List bucket (gcloud storage):"
+          gcloud storage buckets list --filter="name=projects/_/buckets/$B" || true
+          echo "gsutil ls -b gs://$B:" && gsutil ls -b gs://$B
+
+      # Armar FOLDER y BUCKET_PATH (sin depender de .bucket_path)
+      - name: Compute BUCKET_PATH
+        run: |
+          FOLDER="${{ inputs.prefix }}"
+          if [ -n "${{ inputs.version }}" ]; then FOLDER="${{ inputs.prefix }}-${{ inputs.version }}"; fi
+          echo "FOLDER=$FOLDER" >> $GITHUB_ENV
+          echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER" >> $GITHUB_ENV
+          echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
+
+      # 🚀 Deploy con gsutil (usa ADC por env override). Todo no-cache y tipos correctos.
       - name: Deploy to GCS
         run: |
+          set -e
           echo "Deploying to $BUCKET_PATH"
-          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/javascript" cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+
+          # JS
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
+            cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+
+          # CSS
           if [ -f dist/Visualization.css ]; then
-            gsutil -m -h "Cache-Control: no-store" -h "Content-Type: text/css" cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
+              cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
           fi
-          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/json" cp public/Config.json "$BUCKET_PATH/Config.json"
-          gsutil -m -h "Cache-Control: no-store" -h "Content-Type: application/json" cp public/manifest.json "$BUCKET_PATH/manifest.json"
-          if [ -f public/Icon.png ]; then gsutil -m -h "Cache-Control: no-store" -h "Content-Type: image/png" cp public/Icon.png "$BUCKET_PATH/Icon.png"; fi
-          if [ -f public/Logo.png ]; then gsutil -m -h "Cache-Control: no-store" -h "Content-Type: image/png" cp public/Logo.png "$BUCKET_PATH/Logo.png"; fi
+
+          # config.json (minúscula)
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/config.json "$BUCKET_PATH/config.json"
+
+          # manifest.json
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/manifest.json "$BUCKET_PATH/manifest.json"
+
+          # Estáticos opcionales (sin cache también para simplificar)
+          if [ -f public/Icon.png ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+              cp public/Icon.png "$BUCKET_PATH/Icon.png"
+          fi
+          if [ -f public/Logo.png ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+              cp public/Logo.png "$BUCKET_PATH/Logo.png"
+          fi
+
+      # Verificación rápida por HTTP (HEAD)
+      - name: Verify HEAD (HTTP)
+        run: |
+          for u in \
+            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/manifest.json" \
+            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/config.json" \
+            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/Visualization.js" \
+            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/Visualization.css"
+          do
+            echo "::group::HEAD $u"
+            curl -I -sS "$u" | sed -n '1p;/^content-type:/Ip;/^cache-control:/Ip'
+            echo "::endgroup::"
+          done
