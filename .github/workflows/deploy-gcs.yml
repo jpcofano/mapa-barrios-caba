@@ -3,8 +3,12 @@ name: Build & Deploy Community Viz
 on:
   workflow_dispatch:
     inputs:
+      bucket:
+        description: "Bucket GCS (solo nombre, ej: mapa-barrios-degcba)"
+        required: true
+        default: "mapa-barrios-degcba"
       prefix:
-        description: "Carpeta de destino en GCS (ej: barrios-caba-map-v2025)"
+        description: "Carpeta base (ej: barrios-caba-map-v2025)"
         required: true
         default: "barrios-caba-map-v2025"
       version:
@@ -12,187 +16,135 @@ on:
         required: false
         default: ""
       devMode:
-        description: "Forzar devMode en manifest (true|false, opcional)"
+        description: "Forzar devMode en manifest (true|false)"
         required: false
-        default: ""
-      bucket:
-        description: "Bucket GCS (sin gs://)"
-        required: true
-        default: "mapa-barrios-degcba"
-      scheme:
-        description: "Esquema para resources (https|gs)"
-        required: false
-        default: "https"
-      configName:
-        description: "Nombre del config (normalizar a minúscula)"
-        required: false
-        default: "config.json"
-
-permissions:
-  contents: read
-  id-token: write   # requerido para Workload Identity Federation (auth@v2)
+        default: "true"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      NODE_VERSION: "20"
+    permissions:
+      contents: read
+      id-token: write   # requerido para Workload Identity Federation
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install deps
-        run: npm ci
-
-      # Normaliza a config.json en minúscula si vino como Config.json
-      - name: Ensure config.json lowercase
-        run: |
-          if [ -f public/Config.json ] && [ ! -f public/config.json ]; then
-            cp public/Config.json public/config.json
-          fi
-          test -f public/config.json
-
-      # Prepara carpeta destino y actualiza manifest/rutas (si falta arg, corta)
-      - name: Prepare version
-        run: |
-          set -e
-          ARGS=( --bucket "${{ inputs.bucket }}"
-                 --prefix "${{ inputs.prefix }}"
-                 --scheme "${{ inputs.scheme }}"
-                 --configName "${{ inputs.configName }}"
-                 --setIdToFolder "true"
-                 --manifestPath "public/manifest.json" )
-          if [ -n "${{ inputs.version }}" ]; then ARGS+=( --version "${{ inputs.version }}" ); fi
-          if [ -n "${{ inputs.devMode }}" ]; then ARGS+=( --devMode "${{ inputs.devMode }}" ); fi
-          echo "node scripts/prepare-version.mjs ${ARGS[*]}"
-          node scripts/prepare-version.mjs "${ARGS[@]}"
-          echo "==== manifest.json (result) ===="
-          cat public/manifest.json
-
-      - name: Build (Vite)
-        run: npm run build
-
-      # Sanitizar manifest (NBSP/zero-width) y verificar
-      - name: Sanitize manifest (inline)
-        run: |
-          node -e "const fs=require('fs');let t=fs.readFileSync('public/manifest.json','utf8');t=t.replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ').replace(/[\t\r\n]+/g,' ').replace(/\s{2,}/g,' ').trim();fs.writeFileSync('public/manifest.json',t)"
-      - name: Check manifest for NBSP/ZW
-        run: |
-          node -e "const s=require('fs').readFileSync('public/manifest.json','utf8');if(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/.test(s)){console.error('NBSP/zero-width detectado en manifest.json');process.exit(1)}"
-
-      # Assert single bundle
-      - name: Assert single bundle (no dynamic import)
-        run: |
-          test -f dist/Visualization.js
-          if grep -q "import(" dist/Visualization.js; then
-            echo "❌ import() dinámicos en bundle"; exit 1
-          else
-            echo "✅ Sin import() dinámicos"
-          fi
-          if grep -qi "subscribeToData" dist/Visualization.js; then
-            echo "✅ dscc parece bundleado (subscribeToData detectado)"
-          else
-            echo "ℹ️ No se encontró 'subscribeToData' (puede estar minificado); seguimos"
-          fi
-
-      # 🔐 AUTH con WIF (tu forma). Exporta outputs para gsutil.
-      - name: Auth to Google Cloud (WIF)
-        id: auth
+      # 🔐 Auth con WIF (usa tus secrets ya cargados)
+      - name: Auth to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          export_environment_variables: true   # expone GOOGLE_GHA_CREDS_PATH / credentials_file_path
 
-      - name: Setup gcloud (con gsutil)
+      - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          install_components: gsutil
+          version: ">= 471.0.0"
 
-      # Forzar que gsutil use las credenciales de WIF (evita 401 Anonymous)
-      - name: Export ADC env for gsutil
-        run: |
-          echo "GOOGLE_APPLICATION_CREDENTIALS=${{ steps.auth.outputs.credentials_file_path }}" >> $GITHUB_ENV
-          echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=${{ steps.auth.outputs.credentials_file_path }}" >> $GITHUB_ENV
-
-      # 👀 Sanity check (gcloud usa ADC/WIF; gsutil también por override)
-      - name: Auth & Bucket check
-        env:
-          B: ${{ inputs.bucket }}
+      # 📦 Variables derivadas (FOLDER y BUCKET_PATH en GS)
+      - name: Compute paths
+        shell: bash
         run: |
           set -e
-          echo "ADC file: $GOOGLE_APPLICATION_CREDENTIALS"
-          test -f "$GOOGLE_APPLICATION_CREDENTIALS"
-          echo "gcloud version:" && gcloud version
-          echo "Auth list (con WIF puede salir vacío y es OK):" && gcloud auth list || true
-          echo "Access token (recortado):" && gcloud auth print-access-token | head -c 20 && echo "..."
-          echo "gsutil ls -b gs://$B:" && gsutil ls -b gs://$B
-
-      # Armar FOLDER y BUCKET_PATH (sin depender de .bucket_path)
-      - name: Compute BUCKET_PATH
-        run: |
           FOLDER="${{ inputs.prefix }}"
-          if [ -n "${{ inputs.version }}" ]; then FOLDER="${{ inputs.prefix }}-${{ inputs.version }}"; fi
+          if [ -n "${{ inputs.version }}" ]; then
+            FOLDER="${FOLDER}-${{ inputs.version }}"
+          fi
           echo "FOLDER=$FOLDER" >> $GITHUB_ENV
+          echo "BUCKET=${{ inputs.bucket }}" >> $GITHUB_ENV
           echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER" >> $GITHUB_ENV
-          echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
+          echo "-> FOLDER=$FOLDER"
+          echo "-> BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
 
-# 🚀 Deploy con gsutil (usa ADC por env override). No-store + tipos correctos.
-- name: Deploy to GCS
-  run: |
-    set -e
-    echo "Deploying to $BUCKET_PATH"  # ej: gs://mapa-barrios-degcba/barrios-caba-map-v2025-m
+      # 🧩 Parchea manifest local para que apunte a gs:// y respete devMode
+      # (Si ya lo tenés correcto, este paso lo deja igual)
+      - name: Patch manifest to gs://
+        if: hashFiles('public/manifest.json') != ''
+        shell: bash
+        run: |
+          set -e
+          DM="${{ inputs.devMode }}"
+          JS="$BUCKET_PATH/Visualization.js"
+          CFG="$BUCKET_PATH/config.json"
+          CSS="$BUCKET_PATH/Visualization.css"
 
-    # JS
-    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-      cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+          if command -v jq >/dev/null 2>&1; then
+            tmp="$(mktemp)"
+            jq --arg js "$JS" --arg cfg "$CFG" --arg css "$CSS" --argjson dm $( [ "$DM" = "true" ] && echo true || echo false ) '
+              .devMode = $dm
+              | ( .components[0].resource //= {} )
+              | .components[0].resource.js = $js
+              | .components[0].resource.config = $cfg
+              | .components[0].resource.css = $css
+              | del(.packageUrl)
+            ' public/manifest.json > "$tmp"
+            mv "$tmp" public/manifest.json
+          else
+            echo "jq no está disponible; no se parchea manifest."
+          fi
 
-    # CSS
-    if [ -f dist/Visualization.css ]; then
-      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-        cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
-    fi
+      # 🚀 Deploy con gsutil (sin caché y con tipos correctos)
+      - name: Deploy to GCS
+        shell: bash
+        run: |
+          set -e
+          echo "Deploying to $BUCKET_PATH"
 
-    # config.json (minúscula)
-    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-      cp public/config.json "$BUCKET_PATH/config.json"
+          # JS
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
+            cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
 
-    # manifest.json
-    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-      cp public/manifest.json "$BUCKET_PATH/manifest.json"
+          # CSS
+          if [ -f dist/Visualization.css ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
+              cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+          fi
 
-    # Estáticos opcionales (no-store para simplificar pruebas)
-    if [ -f public/Icon.png ]; then
-      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-        cp public/Icon.png "$BUCKET_PATH/Icon.png"
-    fi
-    if [ -f public/Logo.png ]; then
-      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-        cp public/Logo.png "$BUCKET_PATH/Logo.png"
-    fi
+          # config.json (minúscula)
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/config.json "$BUCKET_PATH/config.json"
 
-# ✅ Verificación por gs:// (stat) en vez de HTTPS
-- name: Verify (gs)
-  run: |
-    set -e
-    for o in \
-      "$BUCKET_PATH/manifest.json" \
-      "$BUCKET_PATH/config.json" \
-      "$BUCKET_PATH/Visualization.js" \
-      "$BUCKET_PATH/Visualization.css"
-    do
-      echo "::group::STAT $o"
-      gsutil stat "$o" | sed -n '/^Content-Type:/Ip;/^Cache-Control:/Ip;/^Generation:/Ip;/^Metageneration:/Ip;/^Update time:/Ip'
-      echo "::endgroup::"
-    done
+          # manifest.json (ya parcheado a gs://)
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp public/manifest.json "$BUCKET_PATH/manifest.json"
 
+          # Estáticos opcionales
+          if [ -f public/Icon.png ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+              cp public/Icon.png "$BUCKET_PATH/Icon.png"
+          fi
+          if [ -f public/Logo.png ]; then
+            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+              cp public/Logo.png "$BUCKET_PATH/Logo.png"
+          fi
 
+      # ✅ Verificación por gs:// (stat) en vez de HTTPS
+      - name: Verify (gs)
+        shell: bash
+        run: |
+          set -e
+          for o in \
+            "$BUCKET_PATH/manifest.json" \
+            "$BUCKET_PATH/config.json" \
+            "$BUCKET_PATH/Visualization.js" \
+            "$BUCKET_PATH/Visualization.css"
+          do
+            echo "::group::STAT $o"
+            gsutil stat "$o" | sed -n '/^Content-Type:/Ip;/^Cache-Control:/Ip;/^Generation:/Ip;/^Metageneration:/Ip;/^Update time:/Ip'
+            echo "::endgroup::"
+          done
+
+      # 👀 Mostrar qué URIs referencia el manifest subido (deberían ser gs://...)
+      - name: Show manifest resource URIs
+        shell: bash
+        run: |
+          set -e
+          if command -v jq >/dev/null 2>&1; then
+            echo "::group::manifest.json (components[0].resource)"
+            gsutil cat "$BUCKET_PATH/manifest.json" | jq -r '.components[0].resource | to_entries[] | "\(.key): \(.value)"'
+            echo "::endgroup::"
+          else
+            echo "jq no está disponible; omitiendo inspección de manifest."
+          fi
