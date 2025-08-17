@@ -168,27 +168,34 @@ function colorFromScale(scaleName, t, invert) {
     }
   }
 }
+// Presets categóricos (paletas discretas)
+const PRESET_PALETTES = {
+  viridis: ['#440154','#482777','#3e4989','#31688e','#26828e','#1f9e89','#35b779','#6ece58','#b5de2b','#fde725'],
+  blues:   ['#f7fbff','#deebf7','#c6dbef','#9ecae1','#6baed6','#4292c6','#2171b5','#08519c'],
+  greens:  ['#f7fcf5','#e5f5e0','#c7e9c0','#a1d99b','#74c476','#41ab5d','#238b45','#005a32'],
+  reds:    ['#fff5f0','#fee0d2','#fcbba1','#fc9272','#fb6a4a','#ef3b2c','#cb181d','#99000d'],
+  purples: ['#fcfbfd','#efedf5','#dadaeb','#bcbddc','#9e9ac8','#807dba','#6a51a3','#54278f'],
+  oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04']
+};
 
 // ---------------------- Lectura de estilo (moderno) ----------------------
 function readStyle(message = {}) {
   const s = (message && message.styleById) ? message.styleById : {};
 
-  const getPalette = () => {
-    const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
-    if (raw) {
-      const colors = raw.split(',')
-        .map(x => x.trim())
-        .filter(x => /^#?[0-9a-f]{6}$/i.test(x))
-        .map(x => x.startsWith('#') ? x : '#' + x);
-      if (colors.length) return { mode: 'custom', colors };
-    }
     const v = s.colorPalette && s.colorPalette.value;
     if (v) {
-      if (typeof v === 'string') return { mode: 'custom', colors: [v] };
+      if (typeof v === 'string') {
+        if (PRESET_PALETTES[v]) return { mode: 'preset', colors: PRESET_PALETTES[v] };
+        if (/^#?[0-9a-f]{6}$/i.test(v)) {
+          return { mode: 'custom', colors: [ v.startsWith('#') ? v : ('#' + v) ] };
+        }
+        return { mode: 'custom', colors: [] }; // fallback si la string no es hex ni preset
+      }
       const colors = (v.colors || v.palette || v.values || []);
       return { mode: (v.mode || 'custom'), colors: Array.isArray(colors) ? colors : [] };
     }
     return null;
+
   };
 
   const num = (x, d) => {
