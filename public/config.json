@@ -1,134 +1,110 @@
 {
-  "data": {
-    "fields": {
-      "geoDimension": {
-        "name": "ID del polígono (Geo/Texto)",
-        "types": ["GEO", "TEXT"],
-        "required": true,
-        "max": 1,
-        "description": "Arrastrá el ID que matchee con el GeoJSON (p.ej. COD_BARRIO o NOMBRE)."
-      },
-      "metricPrimary": {
-        "name": "Métrica principal (color)",
-        "types": ["NUMBER"],
-        "required": true,
-        "max": 1,
-        "description": "Métrica usada para colorear las áreas (coropletas)."
-      }
+  "data": [
+    {
+      "id": "datos",
+      "label": "Datos",
+      "elements": [
+        {
+          "id": "geoDimension",
+          "label": "ID del polígono (Geo/Texto)",
+          "type": "DIMENSION",
+          "options": {
+            "min": 1,
+            "max": 1,
+            "supportedTypes": ["TEXT"]
+          }
+        },
+        {
+          "id": "metricPrimary",
+          "label": "Métrica principal (coropleta)",
+          "type": "METRIC",
+          "options": {
+            "min": 1,
+            "max": 1
+          }
+        }
+      ]
     }
-  },
+  ],
   "style": [
     {
       "id": "mapSetup",
-      "label": "Mapa / GeoJSON",
+      "label": "Ajustes del mapa",
       "elements": [
-        {
-          "type": "SELECT_SINGLE",
-          "id": "nivelJerarquia",
-          "label": "Nivel",
-          "options": [
-            { "label": "Barrios", "value": "barrio" },
-            { "label": "Comunas", "value": "comuna" }
-          ],
-          "defaultValue": "barrio"
-        },
-        {
-          "type": "TEXTINPUT",
-          "id": "geojsonProperty",
-          "label": "Propiedad de nombre en GeoJSON (opcional)",
-          "placeholder": "Ej.: NOMBRE_BARRIO"
-        }
+        { "type": "CHECKBOX", "id": "fitToData", "label": "Ajustar vista a los datos" },
+        { "type": "CHECKBOX", "id": "showGraticule", "label": "Mostrar retícula" }
       ]
     },
     {
       "id": "paint",
-      "label": "Colores y escala",
+      "label": "Relleno (coropleta)",
       "elements": [
-        {
-          "type": "SELECT_SINGLE",
-          "id": "colorScale",
-          "label": "Escala continua",
-          "options": [
-            { "label": "Verde → Rojo", "value": "greenToRed" },
-            { "label": "Azul → Amarillo", "value": "blueToYellow" },
-            { "label": "Grises", "value": "grayscale" },
-            { "label": "Amarillos", "value": "yellow" }
-          ],
-          "defaultValue": "greenToRed"
-        },
-        { "type": "CHECKBOX", "id": "invertScale", "label": "Invertir escala", "defaultValue": false },
-        { "type": "OPACITY", "id": "opacity", "label": "Opacidad de relleno", "defaultValue": 0.45 },
-        {
-          "type": "FILL_COLOR",
-          "id": "colorMissing",
-          "label": "Color nulos / sin dato",
-          "defaultValue": { "color": "#cccccc" }
-        },
-        {
-          "type": "TEXTINPUT",
-          "id": "customPalette",
-          "label": "Paleta personalizada (hex separados por coma)",
-          "placeholder": "#f7fbff,#6baed6,#08306b"
-        },
-        {
-          "type": "SELECT_SINGLE",
-          "id": "colorPalette",
-          "label": "Paleta predefinida (categórica)",
-          "options": [
-            { "label": "Viridis", "value": "viridis" },
-            { "label": "Blues", "value": "blues" },
-            { "label": "Greens", "value": "greens" },
-            { "label": "Reds", "value": "reds" },
-            { "label": "Purples", "value": "purples" },
-            { "label": "Oranges", "value": "oranges" }
-          ],
-          "defaultValue": "viridis"
-        }
+        { "type": "FILL_COLOR", "id": "colorMin", "label": "Color mínimo" },
+        { "type": "FILL_COLOR", "id": "colorMid", "label": "Color medio" },
+        { "type": "FILL_COLOR", "id": "colorMax", "label": "Color máximo" },
+        { "type": "FILL_COLOR", "id": "colorNoData", "label": "Color sin datos" },
+        { "type": "OPACITY", "id": "fillOpacity", "label": "Opacidad del relleno" }
       ]
     },
     {
       "id": "borders",
       "label": "Bordes",
       "elements": [
-        { "type": "CHECKBOX", "id": "showBorders", "label": "Mostrar bordes", "defaultValue": true },
-        { "type": "BORDER_COLOR", "id": "borderColor", "label": "Color de borde", "defaultValue": { "color": "#000000" } },
-        { "type": "LINE_WEIGHT", "id": "borderWidth", "label": "Grosor de borde", "defaultValue": 1 },
-        { "type": "OPACITY", "id": "borderOpacity", "label": "Opacidad de borde", "defaultValue": 1 }
+        { "type": "LINE_COLOR", "id": "strokeColor", "label": "Color del borde" },
+        {
+          "type": "NUMBER",
+          "id": "strokeWidth",
+          "label": "Ancho del borde (px)",
+          "options": { "min": 0, "max": 10 }
+        }
       ]
     },
     {
       "id": "labelsLegend",
-      "label": "Etiquetas y leyenda",
+      "label": "Leyenda y etiquetas",
       "elements": [
-        { "type": "CHECKBOX", "id": "showLabels", "label": "Mostrar etiquetas (tooltip)", "defaultValue": true },
-        { "type": "CHECKBOX", "id": "showLegend", "label": "Mostrar leyenda", "defaultValue": true },
+        { "type": "CHECKBOX", "id": "showLegend", "label": "Mostrar leyenda" },
         {
-          "type": "SELECT_RADIO",
+          "type": "SELECT_SINGLE",
           "id": "legendPosition",
           "label": "Posición de la leyenda",
-          "options": [
-            { "label": "Arriba izq.", "value": "topleft" },
-            { "label": "Arriba der.", "value": "topright" },
-            { "label": "Abajo izq.", "value": "bottomleft" },
-            { "label": "Abajo der.", "value": "bottomright" }
-          ],
-          "defaultValue": "bottomright"
-        }
+          "options": {
+            "options": [
+              { "label": "Auto", "value": "auto" },
+              { "label": "Arriba", "value": "top" },
+              { "label": "Abajo", "value": "bottom" },
+              { "label": "Izquierda", "value": "left" },
+              { "label": "Derecha", "value": "right" }
+            ]
+          }
+        },
+        { "type": "CHECKBOX", "id": "showLabels", "label": "Mostrar etiquetas" },
+        { "type": "FONT_COLOR", "id": "labelColor", "label": "Color de etiquetas" }
       ]
     },
     {
       "id": "popup",
-      "label": "Popup",
+      "label": "Tooltip / Popup",
       "elements": [
+        { "type": "CHECKBOX", "id": "enableTooltip", "label": "Habilitar tooltip al pasar" },
         {
-          "type": "TEXTINPUT",
-          "id": "popupFormat",
-          "label": "Formato (usa {{nombre}} y {{valor}})",
-          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
+          "type": "SELECT_SINGLE",
+          "id": "valueFormat",
+          "label": "Formato de valores",
+          "options": {
+            "options": [
+              { "label": "Auto", "value": "auto" },
+              { "label": "Entero", "value": "int" },
+              { "label": "1 decimal", "value": "d1" },
+              { "label": "2 decimales", "value": "d2" },
+              { "label": "Porcentaje", "value": "pct" }
+            ]
+          }
         }
       ]
     }
   ],
-  "interactions": [{ "id": "filter", "supportedActions": ["FILTER"] }],
-  "features": { "enableComparisonDateRange": false }
+  "features": {
+    "enableComparisonDateRange": false
+  }
 }
