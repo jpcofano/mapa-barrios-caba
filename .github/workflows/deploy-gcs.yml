@@ -17,7 +17,7 @@ on:
         required: true
         default: "false"
 
-      # Opcionales (con defaults sensatos)
+      # Opcionales
       bucket:
         description: "Bucket GCS"
         required: true
@@ -65,13 +65,13 @@ jobs:
       - name: Build (si aplica)
         run: npm run build --if-present
 
-      # 🔐 LOGIN clásico con service account key (el que ya usabas)
+      # 🔐 LOGIN clásico con service account key (tu forma anterior)
       - name: Setup gcloud + gsutil (classic SA key)
         uses: google-github-actions/setup-gcloud@v2
         with:
-          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de la SA
+          service_account_key: ${{ secrets.GCP_SA_KEY }}   # JSON de la SA (ci-deploy@…)
           export_default_credentials: true
-          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional si tu SA ya fija proyecto
+          project_id: ${{ secrets.GCP_PROJECT_ID }}        # opcional si la SA ya fija el proyecto
 
       - name: Compute vars
         id: vars
@@ -79,7 +79,12 @@ jobs:
           echo "BUCKET=${{ github.event.inputs.bucket }}" >> $GITHUB_OUTPUT
           echo "FOLDER=${{ github.event.inputs.prefix }}-${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
 
-      # 🔧 PREPARE: pasa TODOS los args al script y muestra el manifest final
+      # (Opcional) Debug argv que recibe Node
+      - name: Debug args to Node
+        run: node -e "console.log('argv=', process.argv.slice(2))" -- --bucket="${{ github.event.inputs.bucket }}" --prefix="${{ github.event.inputs.prefix }}" --version="${{ github.event.inputs.version }}" --devMode="${{ github.event.inputs.devMode }}" --scheme="${{ github.event.inputs.scheme }}" --configName="${{ github.event.inputs.configName }}" --setIdToFolder="${{ github.event.inputs.setIdToFolder }}" --manifestPath="public/manifest.json"
+        shell: bash
+
+      # 🔧 PREPARE: flags en UNA LÍNEA (robusto) + ENV fallback por si algo falla
       - name: Prepare manifest/resources
         env:
           BUCKET:  ${{ github.event.inputs.bucket }}
@@ -89,34 +94,9 @@ jobs:
           SCHEME:  ${{ github.event.inputs.scheme }}
           CONFIGNAME:   ${{ github.event.inputs.configName }}
           SETIDTOFOLDER: ${{ github.event.inputs.setIdToFolder }}
-        run: |
-          set -euo pipefail
-
-          : "${BUCKET:=mapa-barrios-degcba}"
-          : "${PREFIX:?Falta input prefix}"
-          : "${VERSION:?Falta input version}"
-          : "${DEVMODE:=false}"
-          : "${SCHEME:=https}"
-          : "${CONFIGNAME:=config.json}"
-          : "${SETIDTOFOLDER:=true}"
-
-          echo "ARGS → bucket=$BUCKET, prefix=$PREFIX, version=$VERSION, devMode=$DEVMODE, scheme=$SCHEME, configName=$CONFIGNAME, setIdToFolder=$SETIDTOFOLDER"
-
-          SCRIPT="scripts/prepare-version.mjs"
-          [ -f "$SCRIPT" ] || SCRIPT="prepare-version.mjs"
-          [ -f "$SCRIPT" ] || { echo "No se encontró $SCRIPT"; exit 2; }
-
-          node "$SCRIPT" \
-            --bucket="$BUCKET" \
-            --prefix="$PREFIX" \
-            --version="$VERSION" \
-            --devMode="$DEVMODE" \
-            --scheme="$SCHEME" \
-            --configName="$CONFIGNAME" \
-            --setIdToFolder="$SETIDTOFOLDER"
-
-          echo "==== manifest.json (result) ===="
-          cat public/manifest.json
+          MANIFESTPATH: public/manifest.json
+        run: node scripts/prepare-version.mjs --bucket="${{ github.event.inputs.bucket }}" --prefix="${{ github.event.inputs.prefix }}" --version="${{ github.event.inputs.version }}" --devMode="${{ github.event.inputs.devMode }}" --scheme="${{ github.event.inputs.scheme }}" --configName="${{ github.event.inputs.configName }}" --setIdToFolder="${{ github.event.inputs.setIdToFolder }}" --manifestPath="public/manifest.json" && echo "==== manifest.json (result) ====" && cat public/manifest.json
+        shell: bash
 
       - name: Upload to GCS (core files + estáticos)
         env:
