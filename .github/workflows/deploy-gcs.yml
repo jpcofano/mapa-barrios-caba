@@ -146,50 +146,53 @@ jobs:
           echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER" >> $GITHUB_ENV
           echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
 
-      # 🚀 Deploy con gsutil (usa ADC por env override). No-store + tipos correctos.
-      - name: Deploy to GCS
-        run: |
-          set -e
-          echo "Deploying to $BUCKET_PATH"
+# 🚀 Deploy con gsutil (usa ADC por env override). No-store + tipos correctos.
+- name: Deploy to GCS
+  run: |
+    set -e
+    echo "Deploying to $BUCKET_PATH"  # ej: gs://mapa-barrios-degcba/barrios-caba-map-v2025-m
 
-          # JS
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-            cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+    # JS
+    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
+      cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
 
-          # CSS
-          if [ -f dist/Visualization.css ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-              cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
-          fi
+    # CSS
+    if [ -f dist/Visualization.css ]; then
+      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
+        cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
+    fi
 
-          # config.json (minúscula)
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/config.json "$BUCKET_PATH/config.json"
+    # config.json (minúscula)
+    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+      cp public/config.json "$BUCKET_PATH/config.json"
 
-          # manifest.json
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/manifest.json "$BUCKET_PATH/manifest.json"
+    # manifest.json
+    gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+      cp public/manifest.json "$BUCKET_PATH/manifest.json"
 
-          # Estáticos opcionales (no-store para simplificar pruebas)
-          if [ -f public/Icon.png ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-              cp public/Icon.png "$BUCKET_PATH/Icon.png"
-          fi
-          if [ -f public/Logo.png ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-              cp public/Logo.png "$BUCKET_PATH/Logo.png"
-          fi
+    # Estáticos opcionales (no-store para simplificar pruebas)
+    if [ -f public/Icon.png ]; then
+      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+        cp public/Icon.png "$BUCKET_PATH/Icon.png"
+    fi
+    if [ -f public/Logo.png ]; then
+      gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
+        cp public/Logo.png "$BUCKET_PATH/Logo.png"
+    fi
 
-      # Verificación rápida por HTTP (HEAD)
-      - name: Verify HEAD (HTTP)
-        run: |
-          for u in \
-            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/manifest.json" \
-            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/config.json" \
-            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/Visualization.js" \
-            "https://storage.googleapis.com/${{ inputs.bucket }}/$FOLDER/Visualization.css"
-          do
-            echo "::group::HEAD $u"
-            curl -I -sS "$u" | sed -n '1p;/^content-type:/Ip;/^cache-control:/Ip'
-            echo "::endgroup::"
-          done
+# ✅ Verificación por gs:// (stat) en vez de HTTPS
+- name: Verify (gs)
+  run: |
+    set -e
+    for o in \
+      "$BUCKET_PATH/manifest.json" \
+      "$BUCKET_PATH/config.json" \
+      "$BUCKET_PATH/Visualization.js" \
+      "$BUCKET_PATH/Visualization.css"
+    do
+      echo "::group::STAT $o"
+      gsutil stat "$o" | sed -n '/^Content-Type:/Ip;/^Cache-Control:/Ip;/^Generation:/Ip;/^Metageneration:/Ip;/^Update time:/Ip'
+      echo "::endgroup::"
+    done
+
+
