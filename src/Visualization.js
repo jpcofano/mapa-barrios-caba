@@ -215,25 +215,6 @@ function readStyle(message = {}) {
     return Number.isFinite(n) ? n : d;
   };
 
-  return {
-    nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
-    geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
-    colorScale: (s.colorScale && s.colorScale.value) || 'greenToRed',
-    invertScale: !!(s.invertScale && s.invertScale.value),
-    showLabels: !!(s.showLabels && s.showLabels.value),
-    showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
-    legendPosition: (s.legendPosition && s.legendPosition.value) || 'bottomright',
-    showBorders: (s.showBorders && s.showBorders.value !== undefined) ? !!s.showBorders.value : true,
-    borderColor: (s.borderColor && s.borderColor.value && s.borderColor.value.color) || '#000000',
-    borderWidth: num(s.borderWidth && s.borderWidth.value, 1),
-    borderOpacity: num(s.borderOpacity && s.borderOpacity.value, 1),
-    opacity: num(s.opacity && s.opacity.value, 0.45),
-    colorMissing: (s.colorMissing && s.colorMissing.value && s.colorMissing.value.color) || '#cccccc',
-    popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
-    colorPalette: getPalette(),
-  };
-}
-
   const num = (x, d) => {
     const n = Number(x);
     return Number.isFinite(n) ? n : d;
