@@ -3,7 +3,7 @@
 import * as dscc from '@google/dscc';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import './styles.css';
+import './Visualization.css';
 import geojsonText from './barrioscaba.geojson?raw';
 
 // Alias estable: garantiza que el símbolo exista en el bundle y podamos referenciarlo con seguridad
