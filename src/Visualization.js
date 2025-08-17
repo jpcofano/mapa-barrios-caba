@@ -234,7 +234,6 @@ function readStyle(message = {}) {
   };
 }
 
-
   const num = (x, d) => {
     const n = Number(x);
     return Number.isFinite(n) ? n : d;
