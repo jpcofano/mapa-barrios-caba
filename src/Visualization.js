@@ -257,20 +257,32 @@ function readStyle(message = {}) {
     return null;
   };
 
+  // Aceptar colores tanto como {value:{color:"#hex"}} como "#hex" directo
+  const readColor = (node, fallback) => {
+    const val = node?.value ?? node;
+    if (typeof val === 'string') return val;
+    if (val && typeof val === 'object' && typeof val.color === 'string') return val.color;
+    return fallback;
+  };
+
   return {
     nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
     geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
     colorScale: (s.colorScale && s.colorScale.value) || 'greenToRed',
     invertScale: !!(s.invertScale && s.invertScale.value),
+
     showLabels: !!(s.showLabels && s.showLabels.value),
     showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
     legendPosition: (s.legendPosition && s.legendPosition.value) || 'bottomright',
+
     showBorders: (s.showBorders && s.showBorders.value !== undefined) ? !!s.showBorders.value : true,
-    borderColor: (s.borderColor && s.borderColor.value && s.borderColor.value.color) || '#000000',
+    borderColor: readColor(s.borderColor, '#000000'),
     borderWidth: num(s.borderWidth, 1),
     borderOpacity: num(s.borderOpacity, 1),
+
     opacity: num(s.opacity, 0.45),
-    colorMissing: (s.colorMissing && s.colorMissing.value && s.colorMissing.value.color) || '#cccccc',
+    colorMissing: readColor(s.colorMissing, '#cccccc'),
+
     popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
     colorPalette: getPalette(),
   };
@@ -522,6 +534,20 @@ export default function drawVisualization(container, message = {}) {
   const style  = readStyle(message);
   const nivel  = style.nivelJerarquia || 'barrio';
 
+  // Dump legible de los estilos que llegan vs. lo que interpreta readStyle
+  if (DEBUG) {
+    const s = message?.styleById || message?.style || {};
+    const readable = {};
+    for (const [k,v] of Object.entries(s)) {
+      const val = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
+      readable[k] = (val && typeof val === 'object' && 'color' in val) ? val.color : val;
+    }
+    console.group('[Style dump]');
+    console.table(readable);
+    console.log('readStyle():', style);
+    console.groupEnd();
+  }
+
   // Diagnóstico previo
   if (DEBUG) {
     console.group('[Viz] MESSAGE snapshot');
@@ -746,6 +772,8 @@ function fmt(n) {
         console.log('fields:', data?.fields);
         console.groupEnd();
       }
+
+      // Unificar estilos desde styleById o style
       const incomingStyle = data.styleById || data.style || {};
 
       const { headers, rows } = toHeadersRows(norm);
@@ -755,7 +783,8 @@ function fmt(n) {
         fieldsByConfigId: data.fieldsByConfigId || {},
         styleById: incomingStyle || {}
       };
-      if (DEBUG) console.log('style incoming:', incomingStyle); 
+      if (DEBUG) console.log('style incoming:', incomingStyle);
+
       // Escaneo rápido de NBSP/zero-width en dimensión elegida (si la detectamos)
       if (DEBUG && rows.length && headers.length) {
         const vm = buildValueMap({ tables: { DEFAULT: { headers, rows } }, fieldsByConfigId: data.fieldsByConfigId, fields: data.fields });
