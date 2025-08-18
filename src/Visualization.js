@@ -1,10 +1,42 @@
 // NUEVO: trae la API desde el paquete
 // Bundlea la lib de DSCC en tu Visualization.js
-import * as dscc from '@google/dscc';
+//import * as dscc from '@google/dscc';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
 import geojsonText from './barrioscaba.geojson?raw';
+// --- DSCC ADAPTER 2025 (bundle-first, host-safe) ---
+import * as dsccImported from '@google/dscc';
+
+
+function _getDsccNow() {
+  if (dsccImported && typeof dsccImported.subscribeToData === 'function') return dsccImported;
+  if (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
+  return null;
+}
+
+// Expone el import al global SOLO si el host no lo puso (evita doble definición)
+(function exposeImportToWindowIfNeeded() {
+  if (typeof window !== 'undefined') {
+    if (!window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
+      window.dscc = dsccImported;
+    }
+  }
+})();
+
+// Espera a que dscc esté listo (importado o provisto por el host)
+function waitForDscc(maxMs = 4000, interval = 40) {
+  return new Promise((resolve, reject) => {
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    (function loop() {
+      const d = _getDsccNow();
+      if (d) return resolve(d);
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      if (now - t0 > maxMs) return reject(new Error('dscc no está listo'));
+      setTimeout(loop, interval);
+    })();
+  });
+}
 
 // Alias estable: garantiza que el símbolo exista en el bundle y podamos referenciarlo con seguridad
 const dsccModule = dscc;
@@ -242,7 +274,7 @@ function readStyle(message = {}) {
 // ---------------------- Propiedad de nombre por feature ----------------------
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
-  if (customProp && (customProp in p)) return p[customProp];
+  if (customProp && (customProp `in` p)) return p[customProp];
 
   if (nivelJerarquia === 'comuna') {
     const raw = p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
@@ -614,6 +646,56 @@ function fmt(n) {
     }
     return el;
   }
+function handleData(data) {
+  try {
+    console.group('[Viz] Datos con objectTransform');
+    try { window.__lastData = data; } catch {}
+
+    const t = objectToTableShape(data);
+
+    const val = (c) => (c?.v ?? c?.value ?? c);
+    const getCell = (row, h, idx) =>
+      Array.isArray(row) ? row[idx] : (row?.[h.id] ?? row?.[h.name]);
+
+    console.group('[Viz] Preview (tabla normalizada)');
+    console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
+    console.log(`Métricas    (${t.mets.length}):`, t.mets.map(m => m.name));
+    console.log('Headers:', t.headers.map(h => h.name));
+    console.log('Rows:', t.rows.length);
+
+    const sampleCount = Math.min(5, t.rows.length);
+    if (sampleCount > 0) {
+      for (let i = 0; i < sampleCount; i++) {
+        const rowObj = {};
+        t.headers.forEach((h, idx) => {
+          rowObj[h.name] = val(getCell(t.rows[i], h, idx));
+        });
+        console.log(`Fila ${i + 1}:`, rowObj);
+      }
+      const sampleTable = t.rows.slice(0, sampleCount).map(r =>
+        Object.fromEntries(t.headers.map((h, idx) => [h.name, val(getCell(r, h, idx))]))
+      );
+      console.table(sampleTable);
+    } else {
+      console.warn('[Viz] La tabla normalizada no contiene filas.');
+    }
+    console.groupEnd(); // /Preview
+
+    const tableLike = {
+      fields: { dimensions: t.dims, metrics: t.mets },
+      tables: { DEFAULT: { headers: t.headers, rows: t.rows } },
+      fieldsByConfigId: data.fieldsByConfigId || {},
+      styleById: data.styleById || {}
+    };
+    try { window.__lastTableLike = tableLike; } catch {}
+
+    drawVisualization(ensureContainer(), tableLike);
+
+    console.groupEnd(); // /Datos con objectTransform
+  } catch (err) {
+    console.error('[Viz] Error procesando datos (object→table):', err);
+  }
+}
 
 function initWrapper(attempt = 1) {
   try {
@@ -650,15 +732,15 @@ function initWrapper(attempt = 1) {
     _diag(`attempt-${attempt}`);
 
     // --- resolución segura del proveedor dscc (módulo → window → null) ---
-const dsccResolved =
+  const dsccResolved =
   (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
   (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
   null;
 
 if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
   const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
-             : (dsccResolved === window.dscc) ? 'window'
-             : 'unknown';
+           : (dsccResolved === window.dscc) ? 'window'
+           : 'unknown';
 
   console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
     dsccFrom: from,
@@ -666,110 +748,60 @@ if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
     hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
   });
 
-dsccResolved.subscribeToData((data) => {
-  try {
-    console.group('[Viz] Datos con objectTransform');
-    // Copia para inspección en consola
-    try { window.__lastData = data; } catch {}
-
-    // 1) Normalizá objectTransform -> forma "tabla"
-    const t = objectToTableShape(data);
-
-    // 2) Logs robustos (soporta celdas {v,value} y filas objeto/array)
-    const val = (c) => (c?.v ?? c?.value ?? c);
-    const getCell = (row, h, idx) =>
-      Array.isArray(row) ? row[idx] : (row?.[h.id] ?? row?.[h.name]);
-
-    console.group('[Viz] Preview (tabla normalizada)');
-    console.log(`Dimensiones (${t.dims.length}):`, t.dims.map(d => d.name));
-    console.log(`Métricas (${t.mets.length}):`, t.mets.map(m => m.name));
-    console.log(`Headers tabla (${t.headers.length}):`, t.headers.map(h => h.name));
-    console.log(`Total de filas: ${t.rows.length}`);
-
-    if (t.rows.length > 0) {
-      const sampleCount = Math.min(t.rows.length, 5);
-      for (let i = 0; i < sampleCount; i++) {
-        const rowObj = {};
-        t.headers.forEach((h, idx) => {
-          rowObj[h.name] = val(getCell(t.rows[i], h, idx));
-        });
-        console.log(`Fila ${i + 1}:`, rowObj);
-      }
-      // vista compacta
-      const sampleTable = t.rows.slice(0, sampleCount).map(r =>
-        Object.fromEntries(t.headers.map((h, idx) => [h.name, val(getCell(r, h, idx))]))
-      );
-      console.table(sampleTable);
-    } else {
-      console.warn('[Viz] La tabla normalizada no contiene filas.');
-    }
-    console.groupEnd(); // /Preview
-
-  // 3) Armá el "table-like" que consume tu drawVisualization
-  const tableLike = {
-    fields: { dimensions: t.dims, metrics: t.mets },
-    tables: { DEFAULT: { headers: t.headers, rows: t.rows } },
-    fieldsByConfigId: data.fieldsByConfigId || {},
-    styleById: data.styleById || {}
-  };
-  try { window.__lastTableLike = tableLike; } catch {}
-
-  drawVisualization(ensureContainer(), tableLike);
-
-
-    console.groupEnd(); // /Datos con objectTransform
-  } catch (err) {
-    console.error('[Viz] Error procesando datos (object→table):', err);
-  }
-}, { transform: dsccResolved.objectTransform });
+  // Suscripción usando la función extraída
+  dsccResolved.subscribeToData(
+    handleData,
+    { transform: dsccResolved.objectTransform }
+  );
 
   return;
 }
 
-    // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
-    ensureDsccScript();
+// Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
+ensureDsccScript();
 
-    if (attempt < MAX_ATTEMPTS) {
-      console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`, {
-        dsccModuleSubscribe: dsccModuleSubType,
-        dsccWindowSubscribe: typeof window.dscc?.subscribeToData
-      });
-      setTimeout(() => initWrapper(attempt + 1), 1000);
-      return;
+if (attempt < MAX_ATTEMPTS) {
+  console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`, {
+    dsccModuleSubscribe: dsccModuleSubType,
+    dsccWindowSubscribe: typeof window.dscc?.subscribeToData
+  });
+  setTimeout(() => initWrapper(attempt + 1), 1000);
+  return;
+}
+
+// Fallback definitivo (mock) luego de agotar reintentos
+console.error('[Viz] dscc no disponible tras 5 intentos. Entrando en fallback (mock).');
+_diag('fallback');
+
+const container = ensureContainer();
+container.innerHTML = `
+  <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px; margin-bottom:8px">
+    <strong>Sin dscc:</strong> No se pudo inicializar la API de Looker Studio.<br/>
+    Revisá:
+    <ul style="margin:6px 0 0 18px">
+      <li>Que el manifiesto sea el correcto y la viz esté agregada desde ese manifest.</li>
+      <li>Que la fuente de datos tenga habilitado <em>Community visualization access</em>.</li>
+      <li>Que <code>config.json</code> no tenga <code>defaultValue</code> en <code>data.elements</code> (solo en <code>style</code>).</li>
+    </ul>
+  </div>`;
+
+const mockData = {
+  tables: {
+    DEFAULT: {
+      fields: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
+      rows: [
+        { barrio: 'Palermo',  poblacion: 225000 },
+        { barrio: 'Recoleta', poblacion: 188000 }
+      ]
     }
+  },
+  fieldsByConfigId: {
+    geoDimension:  [{ id: 'barrio',    name: 'Barrio' }],
+    metricPrimary: [{ id: 'poblacion', name: 'Población' }]
+  }
+};
 
-    // Fallback definitivo (mock) luego de agotar reintentos
-    console.error('[Viz] dscc no disponible tras 5 intentos. Entrando en fallback (mock).');
-    _diag('fallback');
-
-    const container = ensureContainer();
-    container.innerHTML = `
-      <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px; margin-bottom:8px">
-        <strong>Sin dscc:</strong> No se pudo inicializar la API de Looker Studio.<br/>
-        Revisá:
-        <ul style="margin:6px 0 0 18px">
-          <li>Que el manifiesto sea el correcto y la viz esté agregada desde ese manifest.</li>
-          <li>Que la fuente de datos tenga habilitado <em>Community visualization access</em>.</li>
-          <li>Que <code>Config.json</code> no tenga <code>defaultValue</code> en <code>data.elements</code> (solo en <code>style</code>).</li>
-        </ul>
-      </div>`;
-
-    const mockData = {
-      tables: {
-        DEFAULT: {
-          fields: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
-          rows: [
-            { barrio: 'Palermo',  poblacion: 225000 },
-            { barrio: 'Recoleta', poblacion: 188000 }
-          ]
-        }
-      },
-      fieldsByConfigId: {
-        geoDimension:  [{ id: 'barrio',    name: 'Barrio' }],
-        metricPrimary: [{ id: 'poblacion', name: 'Población' }]
-      }
-    };
-    drawVisualization(container, mockData);
+drawVisualization(container, mockData);
 
   } catch (e) {
     console.error('[Viz] Error initWrapper:', e);
