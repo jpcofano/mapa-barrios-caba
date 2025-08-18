@@ -89,8 +89,8 @@ jobs:
       - name: "Setup gcloud SDK"
         uses: google-github-actions/setup-gcloud@v2
 
-      # ---------- Generar manifest coherente ----------
-      - name: "Generar manifest (limpio y con scheme coherente)"
+      # ---------- Generar manifest coherente (usa tu prepare-version.mjs) ----------
+      - name: "Generar manifest (limpio y scheme coherente)"
         run: |
           node scripts/prepare-version.mjs \
             --bucket "${BUCKET}" \
@@ -102,31 +102,39 @@ jobs:
             --setIdToFolder "${SET_ID_TO_FOLDER}" \
             --manifestPath "${MANIFEST_PATH}"
 
-      # ---------- Calcular carpeta/PKG_PATH con sanitizado robusto ----------
-      - name: Compute package path (sanitized)
+      # ---------- Calcular carpeta/PKG_PATH con sanitizado (SIN Python) ----------
+      - name: Compute package path (sanitized, bash+node)
         id: pkg
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          sanitize() {
-            python3 - <<'PY'
-import sys, re
-s = sys.stdin.read()
-# Quita NBSP y whitespace Unicode (incl. zero-width)
-s = re.sub(r'[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]', '', s)
-# Quita espacios regulares
-s = re.sub(r'\s+', '', s)
-# Permite solo caracteres seguros para rutas GCS
-s = re.sub(r'[^A-Za-z0-9._-]', '', s)
-print(s)
-PY
+          # Función bash: elimina NBSP y espacios Unicode comunes + ASCII,
+          # y deja solo [A-Za-z0-9._-]
+          sanitize_str() {
+            local s="$1"
+            local NBSP=$'\u00A0'
+            # Zero-width / espacios no-ASCII frecuentes
+            local EXTRAS=$'\u200B\u200C\u200D\uFEFF\u202F\u205F\u3000\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A'
+            # quita NBSP
+            s="${s//${NBSP}/}"
+            # quita zero-widths/espacios raros
+            local ch
+            while IFS= read -r -n1 ch; do
+              [ -z "$ch" ] && continue
+              s="${s//${ch}/}"
+            done <<<"$EXTRAS"
+            # quita espacios ASCII
+            s="${s//[[:space:]]/}"
+            # deja solo seguros
+            s="$(printf '%s' "$s" | sed -E 's/[^A-Za-z0-9._-]//g')"
+            printf '%s' "$s"
           }
 
           RAW_PREFIX="${PREFIX}"
           RAW_VERSION="${VERSION}"
-          PFX="$(printf '%s' "$RAW_PREFIX"  | sanitize)"
-          VER="$(printf '%s' "$RAW_VERSION" | sanitize)"
+          PFX="$(sanitize_str "$RAW_PREFIX")"
+          VER="$(sanitize_str "$RAW_VERSION")"
 
           if [[ -z "$PFX" || -z "$VER" ]]; then
             echo "::error ::prefix/version quedaron vacíos tras sanitizar (prefix='${RAW_PREFIX}', version='${RAW_VERSION}')"
@@ -141,38 +149,30 @@ PY
           echo "FOLDER: ${FOLDER}"
           echo "PKG_PATH: ${PKG_PATH}"
 
-          echo "FOLDER=${FOLDER}"   >> "$GITHUB_OUTPUT"
+          echo "FOLDER=${FOLDER}"     >> "$GITHUB_OUTPUT"
           echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_OUTPUT"
-          echo "FOLDER=${FOLDER}"   >> "$GITHUB_ENV"
+          echo "FOLDER=${FOLDER}"     >> "$GITHUB_ENV"
           echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_ENV"
 
-      # ---------- Validación: manifest.packageUrl debe apuntar al mismo folder ----------
+      # ---------- Validar que manifest.packageUrl == carpeta esperada (sin jq) ----------
       - name: Assert manifest/packageUrl matches expected
         shell: bash
         run: |
           set -Eeuo pipefail
-          if ! command -v jq >/dev/null 2>&1; then
-            sudo apt-get update -y && sudo apt-get install -y jq
-          fi
-
-          HAVE="$(jq -r '.packageUrl' "${MANIFEST_PATH}")"
-
+          HAVE="$(node -e "console.log(require(process.env.MANIFEST_PATH).packageUrl)")"
           if [[ "${SCHEME}" == "gs" ]]; then
             EXPECT="${PKG_PATH}"
           else
             EXPECT="https://storage.googleapis.com/${BUCKET}/${FOLDER}/"
           fi
-
           echo "packageUrl (manifest): ${HAVE}"
           echo "Esperado (por scheme): ${EXPECT}"
-
           if [[ "${HAVE}" != "${EXPECT}" ]]; then
             echo "::error ::El packageUrl del manifest NO coincide con la carpeta esperada."
-            echo "::error ::Revisá inputs (bucket/prefix/version/scheme) o scripts/prepare-version.mjs."
             exit 1
           fi
 
-      # ---------- Subida de artefactos ----------
+      # ---------- Subidas ----------
       - name: Upload JS
         run: |
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
@@ -208,9 +208,9 @@ PY
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
             cp "${MANIFEST_PATH}" "${PKG_PATH}manifest.json"
 
-      # ---------- Post-deploy: listar y mostrar manifest ----------
-      - name: Listar carpeta y mostrar manifest subido
+      # ---------- Post-deploy ----------
+      - name: Listar carpeta y mostrar packageUrl subido
         run: |
           gsutil ls -l "${PKG_PATH}"
           echo "packageUrl (subido):"
-          gsutil cp "${PKG_PATH}manifest.json" - | jq -r '.packageUrl'
+          gsutil cp "${PKG_PATH}manifest.json" - | node -e "process.stdin.on('data',b=>{const j=JSON.parse(b.toString());console.log(j.packageUrl)})"
