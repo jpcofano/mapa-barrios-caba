@@ -6,7 +6,6 @@ on:
       bucket:
         description: "Nombre del bucket GCS (sin gs://)"
         required: true
-        default: "mapa-barrios-degcba"   # <-- agrega un default
         type: string
       prefix:
         description: "Prefijo de carpeta (ej: barrios-caba-map-v2025)"
@@ -104,63 +103,61 @@ jobs:
             --manifestPath "${MANIFEST_PATH}"
 
       # ---------- Calcular carpeta/PKG_PATH con sanitizado (SIN Python) ----------
-      - name: Compute package path (sanitized, bash+node)
+      - name: Compute package path (sanitized, bash)
         id: pkg
         shell: bash
         run: |
           set -Eeuo pipefail
-
-          # Función bash: elimina NBSP y espacios Unicode comunes + ASCII,
-          # y deja solo [A-Za-z0-9._-]
           sanitize_str() {
             local s="$1"
             local NBSP=$'\u00A0'
-            # Zero-width / espacios no-ASCII frecuentes
             local EXTRAS=$'\u200B\u200C\u200D\uFEFF\u202F\u205F\u3000\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A'
-            # quita NBSP
             s="${s//${NBSP}/}"
-            # quita zero-widths/espacios raros
             local ch
-            while IFS= read -r -n1 ch; do
-              [ -z "$ch" ] && continue
-              s="${s//${ch}/}"
-            done <<<"$EXTRAS"
-            # quita espacios ASCII
+            while IFS= read -r -n1 ch; do [ -z "$ch" ] && continue; s="${s//${ch}/}"; done <<<"$EXTRAS"
             s="${s//[[:space:]]/}"
-            # deja solo seguros
             s="$(printf '%s' "$s" | sed -E 's/[^A-Za-z0-9._-]//g')"
             printf '%s' "$s"
           }
-
           RAW_PREFIX="${PREFIX}"
           RAW_VERSION="${VERSION}"
           PFX="$(sanitize_str "$RAW_PREFIX")"
           VER="$(sanitize_str "$RAW_VERSION")"
-
           if [[ -z "$PFX" || -z "$VER" ]]; then
-            echo "::error ::prefix/version quedaron vacíos tras sanitizar (prefix='${RAW_PREFIX}', version='${RAW_VERSION}')"
+            echo "::error ::prefix/version vacíos tras sanitizar (prefix='${RAW_PREFIX}', version='${RAW_VERSION}')"
             exit 1
           fi
-
           FOLDER="${PFX}-${VER}"
           PKG_PATH="gs://${BUCKET}/${FOLDER}/"
-
           echo "PFX(raw -> clean): '${RAW_PREFIX}' -> '${PFX}'"
           echo "VER(raw -> clean): '${RAW_VERSION}' -> '${VER}'"
           echo "FOLDER: ${FOLDER}"
           echo "PKG_PATH: ${PKG_PATH}"
-
           echo "FOLDER=${FOLDER}"     >> "$GITHUB_OUTPUT"
           echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_OUTPUT"
           echo "FOLDER=${FOLDER}"     >> "$GITHUB_ENV"
           echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Mostrar manifest (debug)
+        shell: bash
+        run: |
+          echo "::group::manifest.json (head)"
+          if [ -f "${MANIFEST_PATH}" ]; then
+            head -n 80 "${MANIFEST_PATH}"
+          else
+            echo "No existe ${MANIFEST_PATH}"
+            echo "Contenido de $(dirname "${MANIFEST_PATH}")"
+            ls -la "$(dirname "${MANIFEST_PATH}")" || true
+          fi
+          echo "::endgroup::"
 
       # ---------- Validar que manifest.packageUrl == carpeta esperada (sin jq) ----------
       - name: Assert manifest/packageUrl matches expected
         shell: bash
         run: |
           set -Eeuo pipefail
-          HAVE="$(node -e "console.log(require(process.env.MANIFEST_PATH).packageUrl)")"
+          node -e "const fs=require('fs'),path=require('path'); const p=path.resolve(process.env.MANIFEST_PATH); if(!fs.existsSync(p)){ console.error('Manifest no encontrado en:', p); process.exit(2); } const j=JSON.parse(fs.readFileSync(p,'utf8')); console.log('[debug] packageUrl:', j.packageUrl); console.log('[debug] manifestPath:', p);"
+          HAVE="$(node -e "const fs=require('fs'),path=require('path'); const p=path.resolve(process.env.MANIFEST_PATH); const j=JSON.parse(fs.readFileSync(p,'utf8')); process.stdout.write(String(j.packageUrl||''));")"
           if [[ "${SCHEME}" == "gs" ]]; then
             EXPECT="${PKG_PATH}"
           else
@@ -214,4 +211,4 @@ jobs:
         run: |
           gsutil ls -l "${PKG_PATH}"
           echo "packageUrl (subido):"
-          gsutil cp "${PKG_PATH}manifest.json" - | node -e "process.stdin.on('data',b=>{const j=JSON.parse(b.toString());console.log(j.packageUrl)})"
+          gsutil cp "${PKG_PATH}manifest.json" - | node -e "process.stdin.once('data',b=>{const j=JSON.parse(b.toString());console.log(j.packageUrl)})"
