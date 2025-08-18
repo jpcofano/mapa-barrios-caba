@@ -6,6 +6,7 @@ on:
       bucket:
         description: "Nombre del bucket GCS (sin gs://)"
         required: true
+        default: "mapa-barrios-degcba"   # <-- agrega un default
         type: string
       prefix:
         description: "Prefijo de carpeta (ej: barrios-caba-map-v2025)"
