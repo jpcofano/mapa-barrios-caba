@@ -1,4 +1,3 @@
-# .github/workflows/deploy-gcs.yml
 name: Build & Deploy Community
 
 on:
@@ -9,15 +8,15 @@ on:
         required: true
         type: string
       prefix:
-        description: "Prefijo de carpeta (p.ej. barrios-caba-map-v2025)"
+        description: "Prefijo de carpeta (ej: barrios-caba-map-v2025)"
         required: true
         type: string
       version:
-        description: "Versión (p.ej. m, v2025-08-17, etc.)"
+        description: "Versión (ej: m, v2025-08-17, etc.)"
         required: true
         type: string
       devMode:
-        description: "Habilitar devMode en manifest"
+        description: "Habilitar devMode en el manifest"
         required: false
         default: "false"
         type: string
@@ -47,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write  # para Workload Identity Federation
+      id-token: write
 
     env:
       BUCKET: ${{ inputs.bucket }}
@@ -71,7 +70,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Build (Vite o similar)
+      - name: Build (si existe script)
         run: |
           if npm run | grep -qE '^  build'; then
             npm run build
@@ -90,7 +89,8 @@ jobs:
       - name: "Setup gcloud SDK"
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: "Version prep (manifest limpio y scheme coherente)"
+      # ---------- Generar manifest coherente ----------
+      - name: "Generar manifest (limpio y con scheme coherente)"
         run: |
           node scripts/prepare-version.mjs \
             --bucket "${BUCKET}" \
@@ -102,57 +102,115 @@ jobs:
             --setIdToFolder "${SET_ID_TO_FOLDER}" \
             --manifestPath "${MANIFEST_PATH}"
 
-      - name: "Compute package path (sanitizado)"
+      # ---------- Calcular carpeta/PKG_PATH con sanitizado robusto ----------
+      - name: Compute package path (sanitized)
         id: pkg
         shell: bash
         run: |
+          set -Eeuo pipefail
+
           sanitize() {
             python3 - <<'PY'
 import sys, re
 s = sys.stdin.read()
-s = re.sub(r'\u00A0','',s) # NBSP
-s = re.sub(r'\s+','',s)    # espacios
-s = re.sub(r'[^A-Za-z0-9._-]','',s)
+# Quita NBSP y whitespace Unicode (incl. zero-width)
+s = re.sub(r'[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]', '', s)
+# Quita espacios regulares
+s = re.sub(r'\s+', '', s)
+# Permite solo caracteres seguros para rutas GCS
+s = re.sub(r'[^A-Za-z0-9._-]', '', s)
 print(s)
 PY
           }
-          PFX="$(printf '%s' "${PREFIX}" | sanitize)"
-          VER="$(printf '%s' "${VERSION}" | sanitize)"
-          PKG_PATH="gs://${BUCKET}/${PFX}-${VER}/"
-          echo "PKG_PATH=${PKG_PATH}" | tee -a $GITHUB_OUTPUT
-          echo "[deploy] package: ${PKG_PATH}"
 
-      - name: "Upload JS"
+          RAW_PREFIX="${PREFIX}"
+          RAW_VERSION="${VERSION}"
+          PFX="$(printf '%s' "$RAW_PREFIX"  | sanitize)"
+          VER="$(printf '%s' "$RAW_VERSION" | sanitize)"
+
+          if [[ -z "$PFX" || -z "$VER" ]]; then
+            echo "::error ::prefix/version quedaron vacíos tras sanitizar (prefix='${RAW_PREFIX}', version='${RAW_VERSION}')"
+            exit 1
+          fi
+
+          FOLDER="${PFX}-${VER}"
+          PKG_PATH="gs://${BUCKET}/${FOLDER}/"
+
+          echo "PFX(raw -> clean): '${RAW_PREFIX}' -> '${PFX}'"
+          echo "VER(raw -> clean): '${RAW_VERSION}' -> '${VER}'"
+          echo "FOLDER: ${FOLDER}"
+          echo "PKG_PATH: ${PKG_PATH}"
+
+          echo "FOLDER=${FOLDER}"   >> "$GITHUB_OUTPUT"
+          echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_OUTPUT"
+          echo "FOLDER=${FOLDER}"   >> "$GITHUB_ENV"
+          echo "PKG_PATH=${PKG_PATH}" >> "$GITHUB_ENV"
+
+      # ---------- Validación: manifest.packageUrl debe apuntar al mismo folder ----------
+      - name: Assert manifest/packageUrl matches expected
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y jq
+          fi
+
+          HAVE="$(jq -r '.packageUrl' "${MANIFEST_PATH}")"
+
+          if [[ "${SCHEME}" == "gs" ]]; then
+            EXPECT="${PKG_PATH}"
+          else
+            EXPECT="https://storage.googleapis.com/${BUCKET}/${FOLDER}/"
+          fi
+
+          echo "packageUrl (manifest): ${HAVE}"
+          echo "Esperado (por scheme): ${EXPECT}"
+
+          if [[ "${HAVE}" != "${EXPECT}" ]]; then
+            echo "::error ::El packageUrl del manifest NO coincide con la carpeta esperada."
+            echo "::error ::Revisá inputs (bucket/prefix/version/scheme) o scripts/prepare-version.mjs."
+            exit 1
+          fi
+
+      # ---------- Subida de artefactos ----------
+      - name: Upload JS
         run: |
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-            cp dist/Visualization.js "${{ steps.pkg.outputs.PKG_PATH }}Visualization.js"
+            cp dist/Visualization.js "${PKG_PATH}Visualization.js"
 
-      - name: "Upload CSS (si existe)"
+      - name: Upload CSS (si existe)
         run: |
           if [ -f dist/Visualization.css ]; then
             gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-              cp dist/Visualization.css "${{ steps.pkg.outputs.PKG_PATH }}Visualization.css"
+              cp dist/Visualization.css "${PKG_PATH}Visualization.css"
           else
             echo "No hay Visualization.css, se omite."
           fi
 
-      - name: "Upload config.json"
+      - name: Upload config.json
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          CFG_PATH="${MANIFEST_PATH%/*}/${CONFIG_NAME}"
+          if [ ! -f "$CFG_PATH" ]; then
+            if [ -f "public/${CONFIG_NAME}" ]; then
+              CFG_PATH="public/${CONFIG_NAME}"
+            else
+              echo "::error ::No se encontró ${CONFIG_NAME} en ${MANIFEST_PATH%/*} ni en public/"
+              exit 1
+            fi
+          fi
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp "$CFG_PATH" "${PKG_PATH}${CONFIG_NAME}"
+
+      - name: Upload manifest.json
         run: |
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp "${MANIFEST_PATH%/*}/${CONFIG_NAME}" "${{ steps.pkg.outputs.PKG_PATH }}${CONFIG_NAME}"
+            cp "${MANIFEST_PATH}" "${PKG_PATH}manifest.json"
 
-      - name: "Upload manifest.json"
+      # ---------- Post-deploy: listar y mostrar manifest ----------
+      - name: Listar carpeta y mostrar manifest subido
         run: |
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp "${MANIFEST_PATH}" "${{ steps.pkg.outputs.PKG_PATH }}manifest.json"
-
-       (Opcional) Hacer objetos públicos si el bucket no es público
-       - name: "Make objects public (optional)"
-         run: |
-           gsutil iam ch allUsers:objectViewer "gs://${BUCKET}"
-
-      - name: "Show manifest (debug)"
-        run: |
-          gsutil cp "${{ steps.pkg.outputs.PKG_PATH }}manifest.json" - | head -n 80
-          echo "Listando carpeta:"
-          gsutil ls -l "${{ steps.pkg.outputs.PKG_PATH }}"
+          gsutil ls -l "${PKG_PATH}"
+          echo "packageUrl (subido):"
+          gsutil cp "${PKG_PATH}manifest.json" - | jq -r '.packageUrl'
