@@ -1,47 +1,52 @@
-// Community Viz 2025 — Leaflet + Vite + dscc.objectTransform (bundle-first)
-
-import * as dsccImported from '@google/dscc';
+// NUEVO: trae la API desde el paquete
+// Bundlea la lib de DSCC en tu Visualization.js
+//import * as dscc from '@google/dscc';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
 import geojsonText from './barrioscaba.geojson?raw';
+// --- DSCC ADAPTER 2025 (bundle-first, host-safe) ---
+import * as dsccImported from '@google/dscc';
 
-// -----------------------------------------------------------------------------
-// Exponer el import al global SOLO si el host no lo puso (evita doble definición)
-(function exposeImportToWindowIfNeeded() {
-  if (typeof window !== 'undefined') {
-    if (!window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
+
+function _getDsccNow() {
+  if (dsccImported && typeof dsccImported.subscribeToData === 'function') return dsccImported;
+  if (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
+  return null;
+}
+
+// inyecta a window si está el módulo bundleado
+(function(){
+  try{
+    if (typeof window !== 'undefined' && !window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
       window.dscc = dsccImported;
     }
-  }
+  }catch(e){}
 })();
 
-// Espera a que dscc esté listo (importado o provisto por el host)
-function waitForDscc(maxMs = 4000, interval = 40) {
-  return new Promise((resolve, reject) => {
-    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    (function loop() {
-      const d =
-        (dsccImported && typeof dsccImported.subscribeToData === 'function') ? dsccImported :
-        (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
-        null;
+// espera a que dscc esté listo
+function _waitForDscc(maxMs=4000, interval=40){
+  return new Promise((resolve,reject)=>{
+    const t0 = (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+    (function loop(){
+      const d = _getDsccNow();
       if (d) return resolve(d);
-      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const now = (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
       if (now - t0 > maxMs) return reject(new Error('dscc no está listo'));
       setTimeout(loop, interval);
     })();
   });
 }
 
-// Inyección opcional de la lib oficial si el host no la expuso aún
-const ensureDsccScript = (() => {
-  let injected = false;
+// inyección opcional del script oficial si no aparece
+const _ensureDsccScript = (() => {
+  let injected=false;
   return () => {
-    if (typeof window === 'undefined') return false;
+    if (typeof window==='undefined') return false;
     if (typeof window.dscc?.subscribeToData === 'function') return true;
     if (injected) return false;
-    const existing = document.getElementById('__dscc_script');
-    if (existing) { injected = true; return false; }
+    const ex = document.getElementById('__dscc_script');
+    if (ex) { injected = true; return false; }
     const s = document.createElement('script');
     s.id = '__dscc_script';
     s.src = 'https://www.gstatic.com/looker-studio/js/dscc.min.js';
@@ -53,15 +58,13 @@ const ensureDsccScript = (() => {
   };
 })();
 
-// -----------------------------------------------------------------------------
-// Sanitizador de NBSP / espacios en vizId, js, css
+// ---------------------- SANITIZADOR SUAVE (no depende de que haya query) ----------------------
 (function () {
   try {
     const fixOne = (val) => {
       if (!val) return val;
-      // Corrige NBSP/espacio después de "/{carpeta}" en URLs como gs://.../c barrios
       return String(val).replace(
-        /(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i,
+        /(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
         (_m, g1) => g1 + '/'
       );
     };
@@ -74,7 +77,7 @@ const ensureDsccScript = (() => {
     for (const k of keys) {
       if (!usp.has(k)) continue;
       const before = usp.get(k);
-      const after  = fixOne(before);
+      const after = fixOne(before);
       if (after !== before) { usp.set(k, after); changed = true; }
     }
 
@@ -83,28 +86,10 @@ const ensureDsccScript = (() => {
       history.replaceState(null, '', (q ? '?' + q : location.pathname));
       console.log('[Viz] Query saneada: antes=' + rawQ + ', después=' + usp.toString());
     }
-
-    // Caja de diagnóstico (solo si ?diag=1)
-    if (usp.has('diag')) {
-      const box = document.createElement('div');
-      box.style.cssText = 'position:fixed;bottom:8px;left:8px;z-index:999999;background:#000c;color:#fff;padding:8px 10px;border-radius:8px;font:12px system-ui;max-width:70vw;cursor:pointer';
-      box.title = 'clic para cerrar';
-      box.onclick = () => box.remove();
-      const decQ = decodeURIComponent(rawQ);
-      const hasNBSP = /%C2%A0/i.test(rawQ) || /\u00A0/.test(decQ);
-      box.innerHTML = [
-        '<b>Diag URL</b>',
-        'hasNBSP: ' + hasNBSP,
-        'search(raw): ' + rawQ.slice(0, 200),
-        'search(dec): ' + decQ.slice(0, 200)
-      ].join('<br/>');
-      document.body.appendChild(box);
-    }
   } catch (e) { console.error('[Viz] Sanitizador URL error:', e); }
 })();
 
-// -----------------------------------------------------------------------------
-// GeoJSON embebido (Vite: ?raw devuelve string)
+// ---------------------- GEOJSON ----------------------
 let GEOJSON;
 try {
   GEOJSON = JSON.parse(geojsonText);
@@ -113,12 +98,12 @@ try {
   GEOJSON = { type: 'FeatureCollection', features: [] };
 }
 
-// ---------------------- Helpers de texto/colores ----------------------
+// ---------------------- HELPERS ----------------------
 function cleanString(s) {
   return String(s ?? '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // diacríticos
-    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g, ' ') // NBSP + zero-width + separadores
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
@@ -169,12 +154,11 @@ const PRESET_PALETTES = {
   oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04']
 };
 
-// ---------------------- Lectura de estilo (alineado a config.json) ----------------------
+// ---------------------- STYLE (alineado a config.json) ----------------------
 function readStyle(message = {}) {
   const s = (message && message.styleById) ? message.styleById : {};
 
   const getPalette = () => {
-    // 1) Paleta manual (lista de hex separados por coma)
     const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
     if (raw) {
       const colors = raw.split(',')
@@ -184,7 +168,6 @@ function readStyle(message = {}) {
       if (colors.length) return { mode: 'custom', colors };
     }
 
-    // 2) Selector "Paleta predefinida (categórica)" o un color único
     const v = s.colorPalette && s.colorPalette.value;
     if (v) {
       if (typeof v === 'string') {
@@ -224,7 +207,7 @@ function readStyle(message = {}) {
   };
 }
 
-// ---------------------- Propiedad de nombre por feature ----------------------
+// ---------------------- Feature name ----------------------
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
   if (customProp && (customProp in p)) return p[customProp];
@@ -247,16 +230,14 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
   return anyStr ?? '—';
 }
 
-// ---------------------- Números y normalizaciones de tabla ----------------------
+// ---------------------- Números/tabla ----------------------
 function toNumberLoose(x) {
   if (typeof x === 'number') return x;
   const cand = x?.v ?? x?.value ?? x;
   if (typeof cand === 'number') return cand;
   let s = String(cand ?? '').replace(/\s|\u00A0/g, '').trim();
   if (!s) return NaN;
-  // 1.234,56 -> 1234.56
   if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
-  // 1,234.56 -> 1234.56
   else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, '');
   else s = s.replace(',', '.');
   const n = Number(s);
@@ -269,20 +250,17 @@ function normalizeTable(defaultTable, fields = {}) {
     : (Array.isArray(defaultTable.fields) ? defaultTable.fields : []);
   let rows = Array.isArray(defaultTable.rows) ? defaultTable.rows : [];
 
-  // Si no hay headers pero rows son objetos, derivar headers de las keys
   if ((!headers || !headers.length) && rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
     const keys = Object.keys(rows[0]);
     headers = keys.map(k => ({ id: k, name: k }));
   }
 
-  // Si rows son objetos, convertirlos a arrays en el orden de headers
   if (rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
     rows = rows.map(obj =>
       headers.map(h => obj[h.id] ?? obj[h.name] ?? null)
     );
   }
 
-  // Etiquetas legibles para el log (si headers vienen con id opacos)
   const prettyHeaders = headers.map(h => ({
     id: h.id ?? h.name,
     name: fields.dimensions?.find(d => d.id === h.id)?.name ||
@@ -293,7 +271,6 @@ function normalizeTable(defaultTable, fields = {}) {
   return { headers: prettyHeaders, rows };
 }
 
-// ---------------------- Datos: mapear dimensión → métrica ----------------------
 function buildValueMap(message) {
   const fbc = message?.fieldsByConfigId || {};
   const fields = message?.fields || {};
@@ -305,16 +282,13 @@ function buildValueMap(message) {
   console.log('[Viz] rows.length:', rows.length);
   console.log('[Viz] fieldsByConfigId:', Object.keys(fbc));
 
-  // 1) Ubicar índices de dimensión y métrica
   let idxDim = -1, idxMet = -1;
 
-  // Preferimos lo configurado por Config.json
   const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
   const metIdPref = fbc.metricPrimary?.[0]?.id || fbc.metricPrimary?.[0]?.name;
   if (dimIdPref) idxDim = headers.findIndex(h => (h.id || h.name) === dimIdPref);
   if (metIdPref) idxMet = headers.findIndex(h => (h.id || h.name) === metIdPref);
 
-  // Fallback: usar fields.dimensions / fields.metrics
   if (idxDim < 0 && Array.isArray(fields.dimensions) && fields.dimensions.length) {
     const wanted = (fields.dimensions[0].id || fields.dimensions[0].name || '').toString();
     idxDim = headers.findIndex(h => (h.id || h.name) === wanted);
@@ -324,11 +298,9 @@ function buildValueMap(message) {
     idxMet = headers.findIndex(h => (h.id || h.name) === wanted);
   }
 
-  // Heurística por nombre
   if (idxDim < 0)
     idxDim = headers.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
 
-  // Si todavía no hay métrica, detectamos la 1ª columna numérica ≠ dimensión
   if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
     outer:
@@ -349,7 +321,6 @@ function buildValueMap(message) {
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
   }
 
-  // 2) Construir el mapa normalizado
   const map = new Map();
   const values = [];
   for (const row of rows) {
@@ -378,11 +349,10 @@ function buildValueMap(message) {
   return { map, min, max, count: values.length };
 }
 
-// ---------------------- Render principal ----------------------
+// ---------------------- Render ----------------------
 const __leafletState = { map: null, layer: null, legend: null };
 
 export default function drawVisualization(container, message = {}) {
-  // helpers locales de normalización (fallback)
   const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
   const cleanStringFallback = (s) =>
     String(s ?? '')
@@ -402,17 +372,14 @@ export default function drawVisualization(container, message = {}) {
           return Array.from(new Set([base, noSpace, alnum]));
         };
 
-  // Contenedor
   container.style.width = '100%';
   container.style.height = '100%';
 
-  // Estilo + datos
   const style  = readStyle(message);
   const nivel  = style.nivelJerarquia || 'barrio';
   const stats  = buildValueMap(message);
   const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
 
-  // Mapa: crear una sola vez y reutilizar
   if (!__leafletState.map) {
     __leafletState.map = L.map(container, { zoomControl: true, attributionControl: true });
   } else {
@@ -432,7 +399,6 @@ export default function drawVisualization(container, message = {}) {
   }
   const map = __leafletState.map;
 
-  // Estilo por feature
   const styleFn = (feature) => {
     const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
     let v;
@@ -491,7 +457,6 @@ export default function drawVisualization(container, message = {}) {
   }).addTo(map);
   __leafletState.layer = layer;
 
-  // Ajuste de vista
   try {
     const b = layer.getBounds();
     if (b?.isValid && b.isValid()) {
@@ -504,7 +469,6 @@ export default function drawVisualization(container, message = {}) {
     console.warn('[Viz] No se pudo ajustar bounds:', e);
   }
 
-  // Leyenda opcional
   if (style.showLegend) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
@@ -566,7 +530,7 @@ export default function drawVisualization(container, message = {}) {
   }
 }
 
-// ---------------------- Utilidad de formateo ----------------------
+// ---------------------- formato ----------------------
 function fmt(n) {
   if (!Number.isFinite(n)) return 's/d';
   const abs = Math.abs(n);
@@ -576,7 +540,7 @@ function fmt(n) {
   return (Math.round(n * 100) / 100).toString();
 }
 
-// ---------------------- Wrapper dscc: subscribe + objectTransform ----------------------
+// ---------------------- Wrapper dscc ----------------------
 (function () {
   'use strict';
 
@@ -597,7 +561,6 @@ function fmt(n) {
       console.group('[Viz] Datos con objectTransform');
       try { window.__lastData = data; } catch {}
 
-      // Transformar object -> tabla usable
       const byId = data?.fieldsByConfigId || {};
       const dims = byId.geoDimension || byId.dimensions || [];
       const mets = byId.metricPrimary || byId.metrics || [];
@@ -618,7 +581,6 @@ function fmt(n) {
         })
       );
 
-      // Preview rápido en consola
       console.group('[Viz] Preview (tabla normalizada)');
       console.log(`Dimensiones (${dims.length}):`, dims.map(d => d.name));
       console.log(`Métricas    (${mets.length}):`, mets.map(m => m.name));
@@ -633,7 +595,7 @@ function fmt(n) {
       } else {
         console.warn('[Viz] La tabla normalizada no contiene filas.');
       }
-      console.groupEnd(); // /Preview
+      console.groupEnd();
 
       const tableLike = {
         fields: { dimensions: dims, metrics: mets },
@@ -645,7 +607,7 @@ function fmt(n) {
 
       drawVisualization(ensureContainer(), tableLike);
 
-      console.groupEnd(); // /Datos con objectTransform
+      console.groupEnd();
     } catch (err) {
       console.error('[Viz] Error procesando datos (object→table):', err);
     }
@@ -661,53 +623,66 @@ function fmt(n) {
         console.warn('[Viz] No en iframe – dscc del host no se inyectará. Usá un informe real o mock.');
       }
 
-      const dsccWindowSub = typeof window.dscc?.subscribeToData;
-      const dsccModuleSub = typeof dsccImported?.subscribeToData;
+      // --- diagnóstico seguro ---
+      const dsccModule = dsccImported;
+      const dsccModuleExists   = (typeof dsccModule !== 'undefined') && !!dsccModule;
+      const dsccModuleSubType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.subscribeToData : 'undefined';
+      const dsccModuleObjType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.objectTransform  : 'undefined';
 
-      console.log(`[Diag attempt-${attempt}]`, {
-        time: new Date().toISOString(),
-        dsccWindowExists: !!window.dscc,
-        dsccWindowSubscribeType: dsccWindowSub,
-        dsccModuleExists: !!dsccImported,
-        dsccModuleSubscribeType: dsccModuleSub,
-        locationHref: location.href,
-        referrer: document.referrer,
-        attempt
-      });
+      const _diag = (tag) => {
+        console.log(`[Diag ${tag}]`, {
+          time: new Date().toISOString(),
+          dsccWindowExists: !!window.dscc,
+          dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
+          dsccModuleExists,
+          dsccModuleSubscribeType: dsccModuleSubType,
+          dsccModuleObjectTransform: dsccModuleObjType,
+          locationHref: location.href,
+          referrer: document.referrer,
+          attempt
+        });
+      };
 
-      // Resolver (módulo → window → null)
+      _diag(`attempt-${attempt}`);
+
+      // --- resolución segura del proveedor dscc (módulo → window → null) ---
       const dsccResolved =
-        (dsccImported && dsccModuleSub === 'function') ? dsccImported :
-        (window.dscc && dsccWindowSub === 'function') ? window.dscc :
+        (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
+        (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
         null;
 
       if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
-        const from = (dsccResolved === dsccImported) ? 'module' : (dsccResolved === window.dscc) ? 'window' : 'unknown';
+        const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
+                 : (dsccResolved === window.dscc) ? 'window'
+                 : 'unknown';
+
         console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
           dsccFrom: from,
           subscribeType: typeof dsccResolved.subscribeToData,
           hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
         });
 
+        // Suscripción usando la función extraída
         dsccResolved.subscribeToData(
           handleData,
           { transform: dsccResolved.objectTransform }
         );
+
         return;
       }
 
-      // Si todavía no hay dscc, intentar inyectar y reintentar
-      ensureDsccScript();
+      // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
+      _ensureDsccScript();
       if (attempt < MAX_ATTEMPTS) {
         console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`, {
-          dsccModuleSubscribe: dsccModuleSub,
-          dsccWindowSubscribe: dsccWindowSub
+          dsccModuleSubscribe: dsccModuleSubType,
+          dsccWindowSubscribe: typeof window.dscc?.subscribeToData
         });
         setTimeout(() => initWrapper(attempt + 1), 1000);
         return;
       }
 
-      // Fallback (mock) luego de agotar reintentos
+      // Fallback (mock)
       console.error('[Viz] dscc no disponible tras 5 intentos. Entrando en fallback (mock).');
 
       const container = ensureContainer();
@@ -744,7 +719,6 @@ function fmt(n) {
     }
   }
 
-  // Boot strap
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       try { console.log('[Viz] DOMContentLoaded → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
