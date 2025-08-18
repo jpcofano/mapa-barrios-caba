@@ -1,4 +1,4 @@
-// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG
+// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG + Paletas continuas
 
 import * as dsccImported from '@google/dscc';
 import L from 'leaflet';
@@ -143,7 +143,7 @@ const normalizeKeyFuzzy = (s) => {
 
 const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
 const lerp = (a, b, t) => a + (b - a) * clamp01(t);
-const toHex = (x) => Math.round(x).toString(16).padStart(2, '0');
+const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
 const rgb = (r, g, b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 
 function colorFromScale(scaleName, t, invert) {
@@ -179,12 +179,60 @@ const PRESET_PALETTES = {
   oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04']
 };
 
+// Paletas extra “modernas”
+Object.assign(PRESET_PALETTES, {
+  magma:   ['#000004','#1b0c41','#4f0a6d','#7c1d6f','#a52c60','#cf4446','#ed6925','#fb9b06','#f7d13d','#fcfdbf'],
+  plasma:  ['#0d0887','#5b02a3','#9a179b','#cb4679','#ed7953','#fb9f3a','#fdca26','#f0f921'],
+  cividis: ['#00224e','#233b67','#3f5a78','#5a7b89','#7a9c98','#9fbc9f','#c9dca0','#f2f4b3'],
+  turbo:   ['#23171b','#3b0f70','#6a00a8','#9c179e','#bd3786','#d8576b','#ed7953','#fb9f3a','#fdca26','#f0f921'],
+  Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2']
+});
+
+// --- Utilidades para interpolar colores hex ---
+function hexToRgb(h){
+  const x = h.replace('#','');
+  const r = parseInt(x.slice(0,2),16), g = parseInt(x.slice(2,4),16), b = parseInt(x.slice(4,6),16);
+  return [r,g,b];
+}
+function rgbToHex([r,g,b]) {
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+function lerpRgb(a,b,t){
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex([ A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t ]);
+}
+
+// Interpola de forma continua a lo largo de una paleta de N colores
+function samplePaletteContinuous(colors, t){
+  if (!colors || !colors.length) return '#cccccc';
+  if (colors.length === 1) return colors[0];
+  const pos = clamp01(t) * (colors.length - 1);
+  const i = Math.floor(pos);
+  const f = pos - i;
+  const c0 = colors[i];
+  const c1 = colors[Math.min(i+1, colors.length - 1)];
+  return lerpRgb(c0, c1, f);
+}
+
+// Color master: usa paleta continua si hay (respetando invert), si no la escala base
+function getColorFromScaleOrPalette(t, style) {
+  let u = clamp01(t);
+  if (style?.invertScale) u = 1 - u;
+
+  const pal = style?.colorPalette?.colors;
+  if (Array.isArray(pal) && pal.length) {
+    return samplePaletteContinuous(pal, u);
+  }
+  return colorFromScale(style?.colorScale || 'greenToRed', u, /*invertAlreadyHandled*/ false);
+}
+
 /* ============================================================================
    Estilos desde config.json
 ============================================================================ */
 function readStyle(message = {}) {
-  const s = (message && message.styleById) ? message.styleById : {};
+  const s = (message && (message.styleById || message.style)) ? (message.styleById || message.style) : {};
   const num = (x,d) => { const n = Number(x?.value ?? x); return Number.isFinite(n) ? n : d; };
+
   const getPalette = () => {
     const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
     if (raw) {
@@ -280,14 +328,12 @@ function normalizeDEFAULTTable(data) {
   const T = data?.tables?.DEFAULT;
   if (!T) return { ids: [], names: [], rows: [] };
 
-  const coerce = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
-
-  // --- Caso 1: objectTransform clásico ---
+  // Caso 1: {headers, rows} clásico
   if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
     const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
     let ids   = hdrObjs.map(h => h.id ?? null);
     const names = hdrObjs.map(h => h.name ?? h.label ?? h.id ?? '');
-    // Completar ids faltantes con fields name->id (qt_*)
+
     const fieldsAll = []
       .concat(data?.fields?.dimensions || [])
       .concat(data?.fields?.metrics || []);
@@ -295,9 +341,10 @@ function normalizeDEFAULTTable(data) {
       const byName = new Map(fieldsAll.map(f => [String(f.name||'').trim(), f.id]));
       ids = ids.map((id, i) => id || byName.get(String(names[i]||'').trim()) || names[i] || '');
     }
+
     const rows = (T.rows || []).map(row => {
-      const vals = Array.isArray(row) ? row.map(coerce)
-                 : (row && typeof row === 'object') ? ids.map(id => coerce(row[id]))
+      const vals = Array.isArray(row) ? row.map(coerceCell)
+                 : (row && typeof row === 'object') ? ids.map(id => coerceCell(row[id]))
                  : [];
       return {
         __vals: vals,
@@ -309,7 +356,7 @@ function normalizeDEFAULTTable(data) {
     return { ids, names, rows };
   }
 
-  // --- Caso 2: DEFAULT = Array o objeto { "0":…, "1":… } (lo que muestra tu log) ---
+  // Caso 2: DEFAULT = Array o objeto "0..N"
   let rawRows = null;
   if (Array.isArray(T)) rawRows = T;
   else if (T && typeof T === 'object') {
@@ -321,27 +368,23 @@ function normalizeDEFAULTTable(data) {
   }
 
   if (!rawRows) {
-    // Estructura desconocida: mejor no romper
     console.warn('[Viz] DEFAULT con forma no reconocida:', typeof T, T && Object.keys(T));
     return { ids: [], names: [], rows: [] };
   }
 
-  // Derivar filas → array de valores
   const rowsVals = rawRows.map(r => {
-    if (Array.isArray(r)) return r.map(coerce);
+    if (Array.isArray(r)) return r.map(coerceCell);
     if (r && typeof r === 'object') {
-      if (Array.isArray(r.c)) return r.c.map(coerce);          // DataTable
+      if (Array.isArray(r.c)) return r.c.map(coerceCell);          // DataTable
       const keys = Object.keys(r);
-      // { qt_*:{v}, … }  ó  { "0":…, "1":… }
       if (keys.every(k => /^\d+$/.test(k))) {
-        return keys.sort((a,b)=>(+a)-(+b)).map(k => coerce(r[k]));
+        return keys.sort((a,b)=>(+a)-(+b)).map(k => coerceCell(r[k]));
       }
-      return keys.map(k => coerce(r[k]));
+      return keys.map(k => coerceCell(r[k])); // { qt_*:{v}, ... } u otros
     }
-    return [coerce(r)];
+    return [coerceCell(r)];
   });
 
-  // Derivar headers desde data.fields o fallback
   const fieldsAll = []
     .concat(data?.fields?.dimensions || [])
     .concat(data?.fields?.metrics || []);
@@ -364,7 +407,6 @@ function normalizeDEFAULTTable(data) {
 
   return { ids, names, rows };
 }
-
 
 /** Convierte normalizado → {headers, rows} para renderer */
 function toHeadersRows(norm) {
@@ -523,13 +565,7 @@ export default function drawVisualization(container, message = {}) {
     let fillColor;
     if (stats?.map?.size && Number.isFinite(v)) {
       const t = (v - stats.min) / ((stats.max - stats.min) || 1);
-      if (style.colorPalette?.colors?.length) {
-        const n = style.colorPalette.colors.length;
-        const idx = Math.max(0, Math.min(n - 1, Math.round(clamp01(t) * (n - 1))));
-        fillColor = style.colorPalette.colors[idx];
-      } else {
-        fillColor = colorFromScale(style.colorScale, t, style.invertScale);
-      }
+      fillColor = getColorFromScaleOrPalette(t, style);
     } else {
       fillColor = style.colorMissing;
     }
@@ -608,14 +644,7 @@ export default function drawVisualization(container, message = {}) {
         const mid = (a + b) / 2;
         const t = (mid - stats.min) / ((stats.max - stats.min) || 1);
 
-        let col;
-        if (style.colorPalette?.colors?.length) {
-          const n = style.colorPalette.colors.length;
-          const idx = Math.max(0, Math.min(n - 1, Math.round(clamp01(t) * (n - 1))));
-          col = style.colorPalette.colors[idx];
-        } else {
-          col = colorFromScale(style.colorScale, t, style.invertScale);
-        }
+        const col = getColorFromScaleOrPalette(t, style);
 
         const row = document.createElement('div');
         row.style.display = 'flex';
@@ -717,15 +746,16 @@ function fmt(n) {
         console.log('fields:', data?.fields);
         console.groupEnd();
       }
+      const incomingStyle = data.styleById || data.style || {};
 
       const { headers, rows } = toHeadersRows(norm);
       const tableLike = {
         fields: data.fields || {},
         tables: { DEFAULT: { headers, rows } },
         fieldsByConfigId: data.fieldsByConfigId || {},
-        styleById: data.styleById || {}
+        styleById: incomingStyle || {}
       };
-
+      if (DEBUG) console.log('style incoming:', incomingStyle); 
       // Escaneo rápido de NBSP/zero-width en dimensión elegida (si la detectamos)
       if (DEBUG && rows.length && headers.length) {
         const vm = buildValueMap({ tables: { DEFAULT: { headers, rows } }, fieldsByConfigId: data.fieldsByConfigId, fields: data.fields });
@@ -743,84 +773,91 @@ function fmt(n) {
     }
   }
 
-async function initWrapper(attempt = 1) {
-  try {
-    const MAX_ATTEMPTS = 5;
+  async function initWrapper(attempt = 1) {
+    try {
+      const MAX_ATTEMPTS = 5;
 
-    // Evita doble suscripción si esto se llama más de una vez
-    if (window.__VIZ_SUBSCRIBED) {
-      dbg('[Viz] initWrapper: ya suscripto, salgo.');
-      return;
-    }
-
-    const d = await waitForDscc().catch(() => null);
-
-    if (d && typeof d.subscribeToData === 'function') {
-      dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
-
-      // 1) Suscripción principal (objectTransform) → TU FLUJO REAL
-      if (d.objectTransform) {
-        d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
-        window.__VIZ_SUBSCRIBED = true;
-      } else {
-        console.warn('[Viz] objectTransform no disponible; suscribo sin transform (no recomendado)');
-        d.subscribeToData(inspectAndRender);
-        window.__VIZ_SUBSCRIBED = true;
+      // Evita doble suscripción si esto se llama más de una vez
+      if (window.__VIZ_SUBSCRIBED) {
+        dbg('[Viz] initWrapper: ya suscripto, salgo.');
+        return;
       }
 
-      // 3) TAP opcional SOLO para logs con tableTransform (una vez, si DEBUG)
-      if (DEBUG && d.tableTransform && !window.__TAP_TT_DONE) {
-        window.__TAP_TT_DONE = true;
-        const once = (fn) => { let done = false; return (x) => { if (!done) { done = true; fn(x); } }; };
-        d.subscribeToData(
-          once((t) => {
-            console.group('[tap.tableTransform]');
-            try {
-              console.log('tables keys:', Object.keys(t?.tables || {}));
-              console.log('DEFAULT sample row:', t?.tables?.DEFAULT?.[0]);
-              // Si querés ver más filas: console.log('DEFAULT first 3:', t?.tables?.DEFAULT?.slice(0,3));
-            } finally {
-              console.groupEnd();
-            }
-          }),
-          { transform: d.tableTransform }
-        );
+      const d = await waitForDscc().catch(() => null);
+
+      if (d && typeof d.subscribeToData === 'function') {
+        dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
+        dbg('[Viz] transforms:', { object: !!d.objectTransform, table: !!d.tableTransform });
+
+        // 1) Suscripción principal (objectTransform) → TU FLUJO REAL
+        if (d.objectTransform) {
+          d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
+          window.__VIZ_SUBSCRIBED = true;
+        } else {
+          console.warn('[Viz] objectTransform no disponible; suscribo sin transform (no recomendado)');
+          d.subscribeToData(inspectAndRender);
+          window.__VIZ_SUBSCRIBED = true;
+        }
+
+        // 3) TAP opcional SOLO para logs con tableTransform (una vez, si DEBUG)
+        if (DEBUG && d.tableTransform && !window.__TAP_TT_DONE) {
+          window.__TAP_TT_DONE = true;
+          const once = (fn) => { let done = false; return (x) => { if (!done) { done = true; fn(x); } }; };
+          d.subscribeToData(
+            once((t) => {
+              console.group('[tap.tableTransform]');
+              try {
+                console.log('tables keys:', Object.keys(t?.tables || {}));
+                console.log('DEFAULT sample row:', t?.tables?.DEFAULT?.[0]);
+                // console.log('DEFAULT first 3:', t?.tables?.DEFAULT?.slice(0,3));
+              } finally {
+                console.groupEnd();
+              }
+            }),
+            { transform: d.tableTransform }
+          );
+        }
+
+        return; // importante: ya quedaste suscripto
       }
 
-      return; // importante: ya quedaste suscripto
-    }
+      // dscc aún no está → inyectar script y reintentar
+      ensureDsccScript();
+      if (attempt < MAX_ATTEMPTS) {
+        warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
+        setTimeout(() => initWrapper(attempt + 1), 1000);
+        return;
+      }
 
-    // dscc aún no está → inyectar script y reintentar
-    ensureDsccScript();
-    if (attempt < MAX_ATTEMPTS) {
-      warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
-      setTimeout(() => initWrapper(attempt + 1), 1000);
-      return;
-    }
-
-    // Fallback (mock) si dscc nunca llega
-    err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
-    const container = ensureContainer();
-    const mockData = {
-      tables: {
-        DEFAULT: {
-          headers: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
-          rows: [
-            ['Palermo', 225000],
-            ['Recoleta', 188000],
-          ],
+      // Fallback (mock) si dscc nunca llega
+      err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
+      const container = ensureContainer();
+      const mockData = {
+        tables: {
+          DEFAULT: {
+            headers: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
+            rows: [
+              ['Palermo', 225000],
+              ['Recoleta', 188000],
+            ],
+          },
         },
-      },
-      fieldsByConfigId: {
-        geoDimension: [{ id: 'barrio', name: 'Barrio' }],
-        metricPrimary: [{ id: 'poblacion', name: 'Población' }],
-      },
-    };
-    drawVisualization(container, mockData);
-    window.__VIZ_SUBSCRIBED = 'mock';
+        fieldsByConfigId: {
+          geoDimension: [{ id: 'barrio', name: 'Barrio' }],
+          metricPrimary: [{ id: 'poblacion', name: 'Población' }],
+        },
+      };
+      drawVisualization(container, mockData);
+      window.__VIZ_SUBSCRIBED = 'mock';
 
-  } catch (e) {
-    err('[Viz] Error initWrapper:', e);
+    } catch (e) {
+      err('[Viz] Error initWrapper:', e);
+    }
   }
-}
-if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); }); } else { initWrapper().catch(err); } })();
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
+  } else {
+    initWrapper().catch(err);
+  }
+})();
