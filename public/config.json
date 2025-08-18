@@ -38,13 +38,12 @@
           "type": "TEXTINPUT",
           "id": "geojsonProperty",
           "label": "Propiedad personalizada de nombre (opcional)",
-          "placeholder": "e.g. NOMBRE_BARRIO",
-          "help": "Sobrescribe la key del GeoJSON si no es la estándar."
+          "defaultValue": ""
         }
       ]
     },
     {
-      "id": "colorScale",
+      "id": "colors",
       "label": "Escala de color",
       "elements": [
         {
@@ -77,14 +76,14 @@
             { "label": "reds", "value": "reds" },
             { "label": "purples", "value": "purples" },
             { "label": "oranges", "value": "oranges" }
-          ]
+          ],
+          "defaultValue": ""
         },
         {
           "type": "TEXTINPUT",
           "id": "customPalette",
           "label": "Paleta manual (HEX separados por coma)",
-          "placeholder": "#440154,#482777,#3e4989,…",
-          "help": "Ej.: #440154,#482777,#3e4989,#31688e,#26828e,#1f9e89,#35b779,#6ece58,#b5de2b,#fde725"
+          "defaultValue": ""
         }
       ]
     },
@@ -95,14 +94,14 @@
         {
           "type": "OPACITY",
           "id": "opacity",
-          "label": "Opacidad del relleno",
-          "defaultValue": 0.45
+          "label": "Opacidad de relleno",
+          "defaultValue": 0.5
         },
         {
           "type": "FILL_COLOR",
           "id": "colorMissing",
-          "label": "Color sin datos",
-          "defaultValue": { "color": "#cccccc" }
+          "label": "Color para 'Sin datos'",
+          "defaultValue": "#cccccc"
         }
       ]
     },
@@ -119,20 +118,20 @@
         {
           "type": "LINE_COLOR",
           "id": "borderColor",
-          "label": "Color del borde",
-          "defaultValue": { "color": "#000000" }
+          "label": "Color de borde",
+          "defaultValue": "#000000"
         },
         {
-          "type": "NUMBER",
+          "type": "SLIDER",
           "id": "borderWidth",
-          "label": "Grosor del borde (px)",
-          "options": { "min": 0, "max": 10 },
+          "label": "Grosor de borde",
+          "options": { "min": 0, "max": 10, "step": 1 },
           "defaultValue": 1
         },
         {
           "type": "OPACITY",
           "id": "borderOpacity",
-          "label": "Opacidad del borde",
+          "label": "Opacidad de borde",
           "defaultValue": 1
         }
       ]
@@ -144,7 +143,7 @@
         {
           "type": "CHECKBOX",
           "id": "showLabels",
-          "label": "Mostrar nombres en el mapa",
+          "label": "Mostrar etiquetas de nombre",
           "defaultValue": false
         },
         {
@@ -175,14 +174,9 @@
           "type": "TEXTINPUT",
           "id": "popupFormat",
           "label": "Plantilla de popup",
-          "placeholder": "Usá {{nombre}} y {{valor}}",
-          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}",
-          "help": "Variables: {{nombre}} (del feature) y {{valor}} (métrica emparejada)."
+          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
         }
       ]
     }
-  ],
-  "features": {
-    "enableComparisonDateRange": false
-  }
+  ]
 }

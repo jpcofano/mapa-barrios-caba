@@ -1,3 +1,16 @@
+
+// --- parche seguro al inicio de Visualization.js ---
+const _dscc = (typeof window !== "undefined" && (window.dscc || window.google?.datastudio)) || null;
+function onData(cb) {
+  if (_dscc && typeof _dscc.subscribeToData === "function") {
+    _dscc.subscribeToData(cb, { transform: _dscc.tableTransform });
+  } else {
+    console.warn("[Viz] dscc no disponible aún; reintento en 300ms");
+    setTimeout(() => onData(cb), 300);
+  }
+}
+// …y usá onData(draw) en vez de dscc.subscribeToData(draw, …)
+
 // NUEVO: trae la API desde el paquete
 // Bundlea la lib de DSCC en tu Visualization.js
 //import * as dscc from '@google/dscc';
@@ -39,7 +52,7 @@ function waitForDscc(maxMs = 4000, interval = 40) {
 }
 
 // Alias estable: garantiza que el símbolo exista en el bundle y podamos referenciarlo con seguridad
-const dsccModule = dscc;
+const dsccModule = dsccImported;
 
 const ensureDsccScript = (() => {
   let injected = false;
@@ -274,8 +287,7 @@ function readStyle(message = {}) {
 // ---------------------- Propiedad de nombre por feature ----------------------
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
-  if (customProp && (customProp `in` p)) return p[customProp];
-
+  if (customProp && (customProp in p)) return p[customProp];
   if (nivelJerarquia === 'comuna') {
     const raw = p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
     if (raw == null) return raw;
