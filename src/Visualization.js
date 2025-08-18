@@ -277,45 +277,94 @@ const coerceCell = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
  * Devuelve { ids, names, rows[]:{ __vals, byName, byId, __raw } }
  */
 function normalizeDEFAULTTable(data) {
-  const t = data?.tables?.DEFAULT;
-  if (!t) return { ids: [], names: [], rows: [] };
+  const T = data?.tables?.DEFAULT;
+  if (!T) return { ids: [], names: [], rows: [] };
 
-  const hdrObjs = (t.headers || []).map(h => (typeof h === 'string' ? { id: h, name: h } : h));
-  let ids   = hdrObjs.map(h => h.id ?? null);
-  const names = hdrObjs.map(h => h.name ?? h.label ?? h.id ?? '');
+  const coerce = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
 
-  // Completar ids faltantes con fields (name -> id qt_*)
+  // --- Caso 1: objectTransform clásico ---
+  if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
+    const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
+    let ids   = hdrObjs.map(h => h.id ?? null);
+    const names = hdrObjs.map(h => h.name ?? h.label ?? h.id ?? '');
+    // Completar ids faltantes con fields name->id (qt_*)
+    const fieldsAll = []
+      .concat(data?.fields?.dimensions || [])
+      .concat(data?.fields?.metrics || []);
+    if (ids.some(id => !id) && fieldsAll.length) {
+      const byName = new Map(fieldsAll.map(f => [String(f.name||'').trim(), f.id]));
+      ids = ids.map((id, i) => id || byName.get(String(names[i]||'').trim()) || names[i] || '');
+    }
+    const rows = (T.rows || []).map(row => {
+      const vals = Array.isArray(row) ? row.map(coerce)
+                 : (row && typeof row === 'object') ? ids.map(id => coerce(row[id]))
+                 : [];
+      return {
+        __vals: vals,
+        byName: Object.fromEntries(names.map((nm,i)=>[nm, vals[i]])),
+        byId:   Object.fromEntries(ids.map((id ,i)=>[id , vals[i]])),
+        __raw: row,
+      };
+    });
+    return { ids, names, rows };
+  }
+
+  // --- Caso 2: DEFAULT = Array o objeto { "0":…, "1":… } (lo que muestra tu log) ---
+  let rawRows = null;
+  if (Array.isArray(T)) rawRows = T;
+  else if (T && typeof T === 'object') {
+    const ks = Object.keys(T);
+    if (ks.length && ks.every(k => /^\d+$/.test(k))) {
+      ks.sort((a,b)=>(+a)-(+b));
+      rawRows = ks.map(k => T[k]);
+    }
+  }
+
+  if (!rawRows) {
+    // Estructura desconocida: mejor no romper
+    console.warn('[Viz] DEFAULT con forma no reconocida:', typeof T, T && Object.keys(T));
+    return { ids: [], names: [], rows: [] };
+  }
+
+  // Derivar filas → array de valores
+  const rowsVals = rawRows.map(r => {
+    if (Array.isArray(r)) return r.map(coerce);
+    if (r && typeof r === 'object') {
+      if (Array.isArray(r.c)) return r.c.map(coerce);          // DataTable
+      const keys = Object.keys(r);
+      // { qt_*:{v}, … }  ó  { "0":…, "1":… }
+      if (keys.every(k => /^\d+$/.test(k))) {
+        return keys.sort((a,b)=>(+a)-(+b)).map(k => coerce(r[k]));
+      }
+      return keys.map(k => coerce(r[k]));
+    }
+    return [coerce(r)];
+  });
+
+  // Derivar headers desde data.fields o fallback
   const fieldsAll = []
     .concat(data?.fields?.dimensions || [])
     .concat(data?.fields?.metrics || []);
-  if (ids.some(id => !id) && fieldsAll.length) {
-    const byName = new Map(fieldsAll.map(f => [String(f.name||'').trim(), f.id]));
-    ids = ids.map((id, i) => id || byName.get(String(names[i]||'').trim()) || names[i] || '');
+  let ids = [], names = [];
+  if (fieldsAll.length) {
+    ids   = fieldsAll.map((f,i) => f.id || `col${i}`);
+    names = fieldsAll.map((f,i) => f.name || f.id || `col${i+1}`);
+  } else {
+    const ncols = rowsVals.reduce((m,r)=>Math.max(m, r.length), 0);
+    ids   = Array.from({length:ncols}, (_,i)=>`col${i}`);
+    names = Array.from({length:ncols}, (_,i)=>`col${i+1}`);
   }
 
-  const rows = (t.rows || []).map(row => {
-    let values;
-    if (Array.isArray(row)) {
-      values = row.map(coerceCell);
-    } else if (row && typeof row === 'object') {
-      if (Array.isArray(row.c)) {
-        values = row.c.map(coerceCell);
-      } else if (ids.every(id => id in row)) {
-        values = ids.map(id => coerceCell(row[id]));
-      } else {
-        const keys = Object.keys(row).sort((a,b) => (+a)-(+b));
-        values = keys.map(k => coerceCell(row[k]));
-      }
-    } else {
-      values = [];
-    }
-    const byName = Object.fromEntries(names.map((nm, i) => [nm, values[i]]));
-    const byId   = Object.fromEntries(ids.map((id, i)   => [id, values[i]]));
-    return { __vals: values, byName, byId, __raw: row };
-  });
+  const rows = rowsVals.map(vals => ({
+    __vals: vals,
+    byName: Object.fromEntries(names.map((nm,i)=>[nm, vals[i]])),
+    byId:   Object.fromEntries(ids.map((id ,i)=>[id , vals[i]])),
+    __raw: vals
+  }));
 
   return { ids, names, rows };
 }
+
 
 /** Convierte normalizado → {headers, rows} para renderer */
 function toHeadersRows(norm) {
@@ -657,6 +706,17 @@ function fmt(n) {
           console.log('Fila 1 raw :', norm.rows[0].__raw);
         }
       }
+      if (DEBUG) {
+        const T = data?.tables?.DEFAULT;
+        console.group('[Inspector] Forma de DEFAULT');
+        console.log('typeof DEFAULT:', typeof T, 'isArray?', Array.isArray(T));
+        if (T) {
+          try { console.log('DEFAULT keys:', Object.keys(T).slice(0,10)); } catch {}
+          if (Array.isArray(T)) console.log('DEFAULT length:', T.length, 'ej0:', T[0]);
+        }
+        console.log('fields:', data?.fields);
+        console.groupEnd();
+      }
 
       const { headers, rows } = toHeadersRows(norm);
       const tableLike = {
@@ -683,51 +743,84 @@ function fmt(n) {
     }
   }
 
-  async function initWrapper(attempt = 1) {
-    try {
-      const MAX_ATTEMPTS = 5;
+async function initWrapper(attempt = 1) {
+  try {
+    const MAX_ATTEMPTS = 5;
 
-      const d = await waitForDscc().catch(() => null);
-      if (d && typeof d.subscribeToData === 'function') {
-        dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
-        d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
-        return;
-      }
-
-      ensureDsccScript();
-      if (attempt < MAX_ATTEMPTS) {
-        warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
-        setTimeout(() => initWrapper(attempt + 1), 1000);
-        return;
-      }
-
-      // Fallback (mock) si dscc nunca llega
-      err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
-      const container = ensureContainer();
-      const mockData = {
-        tables: {
-          DEFAULT: {
-            headers: [{id:'barrio',name:'Barrio'},{id:'poblacion',name:'Población'}],
-            rows: [
-              ['Palermo', 225000],
-              ['Recoleta',188000]
-            ]
-          }
-        },
-        fieldsByConfigId: {
-          geoDimension:  [{ id: 'barrio',    name: 'Barrio' }],
-          metricPrimary: [{ id: 'poblacion', name: 'Población' }]
-        }
-      };
-      drawVisualization(container, mockData);
-    } catch (e) {
-      err('[Viz] Error initWrapper:', e);
+    // Evita doble suscripción si esto se llama más de una vez
+    if (window.__VIZ_SUBSCRIBED) {
+      dbg('[Viz] initWrapper: ya suscripto, salgo.');
+      return;
     }
-  }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
-  } else {
-    initWrapper().catch(err);
+    const d = await waitForDscc().catch(() => null);
+
+    if (d && typeof d.subscribeToData === 'function') {
+      dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
+
+      // 1) Suscripción principal (objectTransform) → TU FLUJO REAL
+      if (d.objectTransform) {
+        d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
+        window.__VIZ_SUBSCRIBED = true;
+      } else {
+        console.warn('[Viz] objectTransform no disponible; suscribo sin transform (no recomendado)');
+        d.subscribeToData(inspectAndRender);
+        window.__VIZ_SUBSCRIBED = true;
+      }
+
+      // 3) TAP opcional SOLO para logs con tableTransform (una vez, si DEBUG)
+      if (DEBUG && d.tableTransform && !window.__TAP_TT_DONE) {
+        window.__TAP_TT_DONE = true;
+        const once = (fn) => { let done = false; return (x) => { if (!done) { done = true; fn(x); } }; };
+        d.subscribeToData(
+          once((t) => {
+            console.group('[tap.tableTransform]');
+            try {
+              console.log('tables keys:', Object.keys(t?.tables || {}));
+              console.log('DEFAULT sample row:', t?.tables?.DEFAULT?.[0]);
+              // Si querés ver más filas: console.log('DEFAULT first 3:', t?.tables?.DEFAULT?.slice(0,3));
+            } finally {
+              console.groupEnd();
+            }
+          }),
+          { transform: d.tableTransform }
+        );
+      }
+
+      return; // importante: ya quedaste suscripto
+    }
+
+    // dscc aún no está → inyectar script y reintentar
+    ensureDsccScript();
+    if (attempt < MAX_ATTEMPTS) {
+      warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
+      setTimeout(() => initWrapper(attempt + 1), 1000);
+      return;
+    }
+
+    // Fallback (mock) si dscc nunca llega
+    err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
+    const container = ensureContainer();
+    const mockData = {
+      tables: {
+        DEFAULT: {
+          headers: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
+          rows: [
+            ['Palermo', 225000],
+            ['Recoleta', 188000],
+          ],
+        },
+      },
+      fieldsByConfigId: {
+        geoDimension: [{ id: 'barrio', name: 'Barrio' }],
+        metricPrimary: [{ id: 'poblacion', name: 'Población' }],
+      },
+    };
+    drawVisualization(container, mockData);
+    window.__VIZ_SUBSCRIBED = 'mock';
+
+  } catch (e) {
+    err('[Viz] Error initWrapper:', e);
   }
-})();
+}
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); }); } else { initWrapper().catch(err); } })();
