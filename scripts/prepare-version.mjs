@@ -1,40 +1,38 @@
-#!/usr/bin/env node
-/**
- * prepare-version.mjs
- *
- * Uso típico (HTTPS + config.json):
- *   node scripts/prepare-version.mjs \
- *     --bucket mapa-barrios-degcba \
- *     --prefix barrios-caba-map-v2025 \
- *     --version m \
- *     --devMode false \
- *     --scheme https \
- *     --configName config.json \
- *     --setIdToFolder true
- *
- * Alternativa (resources por gs:// y Config.json):
- *   node scripts/prepare-version.mjs \
- *     --bucket mapa-barrios-degcba \
- *     --prefix barrios-caba-map-v2025 \
- *     --version n \
- *     --devMode true \
- *     --scheme gs \
- *     --configName Config.json \
- *     --setIdToFolder true
- *
- * manifestPath opcional (por defecto public/manifest.json):
- *   --manifestPath ./public/manifest.json
- */
+// scripts/prepare-version.mjs
+// Prepara carpeta <prefix>-<version>/ y genera manifest.json con esquema gs:// u https://
+// - Sanea NBSP/espacios y caracteres raros en prefix/version
+// - Alinea packageUrl con el esquema elegido (--scheme gs|https)
+// - Respeta devMode, configName, setIdToFolder, manifestPath
 
-import fs from "node:fs";
-import path from "node:path";
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { dirname, resolve } from 'path';
 
-// ------------------ helpers ------------------
-function getArg(name, def = undefined) {
-  const i = process.argv.findIndex(a => a === `--${name}`);
-  if (i >= 0 && i + 1 < process.argv.length) return process.argv[i + 1];
-  return def;
+// ------------------ util args ------------------
+function parseArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const t = argv[i];
+    if (!t.startsWith('--')) continue;
+    const eq = t.indexOf('=');
+    if (eq > -1) {
+      const k = t.slice(2, eq);
+      const v = t.slice(eq + 1);
+      out[k] = v;
+    } else {
+      const k = t.slice(2);
+      const nxt = argv[i + 1];
+      if (nxt && !nxt.startsWith('--')) {
+        out[k] = nxt; i++;
+      } else {
+        out[k] = 'true';
+      }
+    }
+  }
+  return out;
 }
+const ARGS = parseArgs(process.argv.slice(2));
+const getArg = (k, d = undefined) => (ARGS[k] !== undefined ? ARGS[k] : d);
+
 const toBool = (v, d=false) => {
   if (v === undefined) return d;
   const s = String(v).toLowerCase();
@@ -44,85 +42,90 @@ const toBool = (v, d=false) => {
 };
 const ensureSlash = (u) => (u.endsWith("/") ? u : u + "/");
 
-// ------------------ args ------------------
-const bucket        = getArg("bucket");
-const prefix        = getArg("prefix");
-const version       = getArg("version");
-const devMode       = toBool(getArg("devMode","false"), false);
-const scheme        = (getArg("scheme","https") || "https").toLowerCase(); // https | gs
-const configName    = getArg("configName","config.json"); // permite config.json o Config.json
-const setIdToFolder = toBool(getArg("setIdToFolder","true"), true);
-const manifestPath  = getArg("manifestPath", path.join("public","manifest.json"));
+// --- Saneador duro: quita NBSP/espacios y filtra a [A-Za-z0-9._-] ---
+const NBSP_RE = /\u00A0/g;
+function sanitizeArg(x) {
+  if (x == null) return "";
+  let s = String(x).replace(NBSP_RE, ""); // NBSP
+  s = s.replace(/\s+/g, "");              // espacios
+  s = s.replace(/[^A-Za-z0-9._-]/g, "");  // solo seguros
+  return s;
+}
 
-if (!bucket || !prefix || !version) {
-  console.error("Faltan args. Usá: --bucket --prefix --version [--devMode] [--scheme=https|gs] [--configName=config.json] [--setIdToFolder=true] [--manifestPath=public/manifest.json]");
+// ------------------ inputs ------------------
+const bucket        = getArg("bucket");
+const prefixRaw     = getArg("prefix");
+const versionRaw    = getArg("version");
+const devMode       = toBool(getArg("devMode"), false);
+const scheme        = (getArg("scheme", "gs") || "gs").toLowerCase(); // gs | https
+const configName    = getArg("configName", "config.json");
+const setIdToFolder = toBool(getArg("setIdToFolder"), true);
+const manifestPath  = getArg("manifestPath", "public/manifest.json");
+
+// requeridos
+if (!bucket) {
+  console.error("Falta --bucket");
+  process.exit(1);
+}
+if (!prefixRaw) {
+  console.error("Falta --prefix");
+  process.exit(1);
+}
+if (!versionRaw) {
+  console.error("Falta --version");
   process.exit(1);
 }
 
-if (!fs.existsSync(manifestPath)) {
-  console.error(`No existe manifest en: ${manifestPath}`);
-  process.exit(2);
-}
+// saneo
+const prefix        = sanitizeArg(prefixRaw);
+const version       = sanitizeArg(versionRaw);
+const folderName    = `${prefix}-${version}`;
 
-const folderName = `${prefix}-${version}`;
+// bases
 const HTTPS_BASE = `https://storage.googleapis.com/${bucket}/${folderName}`;
 const GS_BASE    = `gs://${bucket}/${folderName}`;
-const baseAbs    = scheme === "gs" ? GS_BASE : HTTPS_BASE;
+const baseAbs    = scheme === "gs" ? GS_BASE : HTTPS_BASE;      // para js/css/config
+const PACKAGE_BASE = scheme === "gs" ? GS_BASE : HTTPS_BASE;    // para packageUrl
 
-// ------------------ load manifest ------------------
-const raw = fs.readFileSync(manifestPath, "utf8");
-// Quitar BOM si hubiera
-const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
-
-let manifest;
-try {
-  manifest = JSON.parse(text);
-} catch (e) {
-  console.error("manifest.json inválido:", e.message);
-  process.exit(3);
-}
-
-// ------------------ mutate manifest ------------------
-// packageUrl: dejamos HTTPS (mejor para Preview/UX). resources usan scheme elegido.
-manifest.packageUrl = ensureSlash(HTTPS_BASE);
-manifest.devMode = devMode;
-
-// A) Si tiene "components": actualizamos TODOS los componentes
-if (Array.isArray(manifest.components)) {
-  manifest.components = manifest.components.map((comp, idx) => {
-    const copy = { ...comp };
-
-    if (setIdToFolder || !copy.id) {
-      copy.id = folderName;
+// ------------------ manifest ------------------
+const manifest = {
+  name: "Barrios CABA Map",
+  version: version,
+  organization: "Tu Org",
+  description: "Mapa de barrios CABA con coropletas",
+  logoUrl: `https://storage.googleapis.com/${bucket}/Logo.png`, // imágenes por HTTPS
+  packageUrl: ensureSlash(PACKAGE_BASE),
+  components: [{
+    id: setIdToFolder ? folderName : "viz",
+    name: "Barrios / Comunas CABA",
+    iconUrl: `https://storage.googleapis.com/${bucket}/Icon.png`,
+    description: "Coropletas, etiquetas y leyenda configurables",
+    resource: {
+      // En manifest van rutas relativas respecto de packageUrl
+      js: "Visualization.js",
+      css: "Visualization.css",
+      config: configName
     }
+  }],
+  devMode: devMode
+};
 
-    // asegurar resource
-    if (!copy.resource || typeof copy.resource !== "object") copy.resource = {};
-    copy.resource.js     = `${baseAbs}/Visualization.js`;
-    copy.resource.css    = `${baseAbs}/Visualization.css`;
-    copy.resource.config = `${baseAbs}/${configName}`;
-
-    return copy;
-  });
-}
-
-// B) Compatibility: si existe "resources" top-level (fuera de spec de LS, pero útil en tests), lo actualizamos también.
-if (manifest.resources && typeof manifest.resources === "object") {
-  const r = manifest.resources;
-  // Permitir array o string
-  r.js     = Array.isArray(r.js) ? r.js.map(() => `${baseAbs}/Visualization.js`) : `${baseAbs}/Visualization.js`;
-  r.css    = Array.isArray(r.css) ? r.css.map(() => `${baseAbs}/Visualization.css`) : `${baseAbs}/Visualization.css`;
-  r.config = `${baseAbs}/${configName}`;
-}
-
-// ------------------ save ------------------
-fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+// ------------------ write ------------------
+const outFile = resolve(manifestPath);
+const outDir  = dirname(outFile);
+if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+writeFileSync(outFile, JSON.stringify(manifest, null, 2), { encoding: "utf-8" });
 
 // ------------------ report ------------------
 console.log("=== prepare-version.mjs ===");
 console.log("bucket:         ", bucket);
-console.log("prefix:         ", prefix);
-console.log("version:        ", version);
+console.log("prefix:         ", prefix, "(raw:", prefixRaw, ")");
+console.log("version:        ", version, "(raw:", versionRaw, ")");
 console.log("folderName:     ", folderName);
 console.log("scheme:         ", scheme);
 console.log("configName:     ", configName);
+console.log("setIdToFolder:  ", setIdToFolder);
+console.log("devMode:        ", devMode);
+console.log("packageUrl:     ", manifest.packageUrl);
+console.log("js/css/config:  ", `${baseAbs}/Visualization.js`, `${baseAbs}/Visualization.css`, `${baseAbs}/${configName}`);
+console.log("manifestPath:   ", outFile);

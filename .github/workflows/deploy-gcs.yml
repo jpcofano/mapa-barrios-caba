@@ -1,150 +1,158 @@
-name: Build & Deploy Community Viz
+# .github/workflows/deploy-gcs.yml
+name: Build & Deploy Community
 
 on:
   workflow_dispatch:
     inputs:
       bucket:
-        description: "Bucket GCS (solo nombre, ej: mapa-barrios-degcba)"
+        description: "Nombre del bucket GCS (sin gs://)"
         required: true
-        default: "mapa-barrios-degcba"
+        type: string
       prefix:
-        description: "Carpeta base (ej: barrios-caba-map-v2025)"
+        description: "Prefijo de carpeta (p.ej. barrios-caba-map-v2025)"
         required: true
-        default: "barrios-caba-map-v2025"
+        type: string
       version:
-        description: "Sufijo de versión (ej: m). Si está vacío, no agrega sufijo."
-        required: false
-        default: ""
+        description: "Versión (p.ej. m, v2025-08-17, etc.)"
+        required: true
+        type: string
       devMode:
-        description: "Forzar devMode en manifest (true|false)"
+        description: "Habilitar devMode en manifest"
+        required: false
+        default: "false"
+        type: string
+      scheme:
+        description: "Esquema para packageUrl/resources (gs|https)"
+        required: false
+        default: "gs"
+        type: string
+      configName:
+        description: "Nombre del config (default: config.json)"
+        required: false
+        default: "config.json"
+        type: string
+      setIdToFolder:
+        description: "Usar <prefix>-<version> como id del componente"
         required: false
         default: "true"
+        type: string
+      manifestPath:
+        description: "Ruta de salida del manifest (default: public/manifest.json)"
+        required: false
+        default: "public/manifest.json"
+        type: string
 
 jobs:
-  deploy:
+  build-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # requerido para Workload Identity Federation
+      id-token: write  # para Workload Identity Federation
+
+    env:
+      BUCKET: ${{ inputs.bucket }}
+      PREFIX: ${{ inputs.prefix }}
+      VERSION: ${{ inputs.version }}
+      DEV_MODE: ${{ inputs.devMode }}
+      SCHEME: ${{ inputs.scheme }}
+      CONFIG_NAME: ${{ inputs.configName }}
+      SET_ID_TO_FOLDER: ${{ inputs.setIdToFolder }}
+      MANIFEST_PATH: ${{ inputs.manifestPath }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 🔐 Auth con WIF (usa tus secrets ya cargados)
-      - name: Auth to Google Cloud
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (Vite o similar)
+        run: |
+          if npm run | grep -qE '^  build'; then
+            npm run build
+          else
+            echo "No hay script build, continuo..."
+          fi
+
+      # ---------- Auth con Workload Identity ----------
+      - name: "Auth to Google Cloud (WIF)"
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Setup gcloud
+      - name: "Setup gcloud SDK"
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          version: ">= 471.0.0"
 
-      # 📦 Variables derivadas (FOLDER y BUCKET_PATH en GS)
-      - name: Compute paths
+      - name: "Version prep (manifest limpio y scheme coherente)"
+        run: |
+          node scripts/prepare-version.mjs \
+            --bucket "${BUCKET}" \
+            --prefix "${PREFIX}" \
+            --version "${VERSION}" \
+            --devMode "${DEV_MODE}" \
+            --scheme "${SCHEME}" \
+            --configName "${CONFIG_NAME}" \
+            --setIdToFolder "${SET_ID_TO_FOLDER}" \
+            --manifestPath "${MANIFEST_PATH}"
+
+      - name: "Compute package path (sanitizado)"
+        id: pkg
         shell: bash
         run: |
-          set -e
-          FOLDER="${{ inputs.prefix }}"
-          if [ -n "${{ inputs.version }}" ]; then
-            FOLDER="${FOLDER}-${{ inputs.version }}"
-          fi
-          echo "FOLDER=$FOLDER" >> $GITHUB_ENV
-          echo "BUCKET=${{ inputs.bucket }}" >> $GITHUB_ENV
-          echo "BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER" >> $GITHUB_ENV
-          echo "-> FOLDER=$FOLDER"
-          echo "-> BUCKET_PATH=gs://${{ inputs.bucket }}/$FOLDER"
+          sanitize() {
+            python3 - <<'PY'
+import sys, re
+s = sys.stdin.read()
+s = re.sub(r'\u00A0','',s) # NBSP
+s = re.sub(r'\s+','',s)    # espacios
+s = re.sub(r'[^A-Za-z0-9._-]','',s)
+print(s)
+PY
+          }
+          PFX="$(printf '%s' "${PREFIX}" | sanitize)"
+          VER="$(printf '%s' "${VERSION}" | sanitize)"
+          PKG_PATH="gs://${BUCKET}/${PFX}-${VER}/"
+          echo "PKG_PATH=${PKG_PATH}" | tee -a $GITHUB_OUTPUT
+          echo "[deploy] package: ${PKG_PATH}"
 
-      # 🧩 Parchea manifest local para que apunte a gs:// y respete devMode
-      # (Si ya lo tenés correcto, este paso lo deja igual)
-      - name: Patch manifest to gs://
-        if: hashFiles('public/manifest.json') != ''
-        shell: bash
+      - name: "Upload JS"
         run: |
-          set -e
-          DM="${{ inputs.devMode }}"
-          JS="$BUCKET_PATH/Visualization.js"
-          CFG="$BUCKET_PATH/config.json"
-          CSS="$BUCKET_PATH/Visualization.css"
-
-          if command -v jq >/dev/null 2>&1; then
-            tmp="$(mktemp)"
-            jq --arg js "$JS" --arg cfg "$CFG" --arg css "$CSS" --argjson dm $( [ "$DM" = "true" ] && echo true || echo false ) '
-              .devMode = $dm
-              | ( .components[0].resource //= {} )
-              | .components[0].resource.js = $js
-              | .components[0].resource.config = $cfg
-              | .components[0].resource.css = $css
-              | del(.packageUrl)
-            ' public/manifest.json > "$tmp"
-            mv "$tmp" public/manifest.json
-          else
-            echo "jq no está disponible; no se parchea manifest."
-          fi
-
-      # 🚀 Deploy con gsutil (sin caché y con tipos correctos)
-      - name: Deploy to GCS
-        shell: bash
-        run: |
-          set -e
-          echo "Deploying to $BUCKET_PATH"
-
-          # JS
           gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/javascript" \
-            cp dist/Visualization.js "$BUCKET_PATH/Visualization.js"
+            cp dist/Visualization.js "${{ steps.pkg.outputs.PKG_PATH }}Visualization.js"
 
-          # CSS
+      - name: "Upload CSS (si existe)"
+        run: |
           if [ -f dist/Visualization.css ]; then
             gsutil -m -h "Cache-Control:no-store" -h "Content-Type: text/css" \
-              cp dist/Visualization.css "$BUCKET_PATH/Visualization.css"
-          fi
-
-          # config.json (minúscula)
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/config.json "$BUCKET_PATH/config.json"
-
-          # manifest.json (ya parcheado a gs://)
-          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
-            cp public/manifest.json "$BUCKET_PATH/manifest.json"
-
-          # Estáticos opcionales
-          if [ -f public/Icon.png ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-              cp public/Icon.png "$BUCKET_PATH/Icon.png"
-          fi
-          if [ -f public/Logo.png ]; then
-            gsutil -m -h "Cache-Control:no-store" -h "Content-Type: image/png" \
-              cp public/Logo.png "$BUCKET_PATH/Logo.png"
-          fi
-
-      # ✅ Verificación por gs:// (stat) en vez de HTTPS
-      - name: Verify (gs)
-        shell: bash
-        run: |
-          set -e
-          for o in \
-            "$BUCKET_PATH/manifest.json" \
-            "$BUCKET_PATH/config.json" \
-            "$BUCKET_PATH/Visualization.js" \
-            "$BUCKET_PATH/Visualization.css"
-          do
-            echo "::group::STAT $o"
-            gsutil stat "$o" | sed -n '/^Content-Type:/Ip;/^Cache-Control:/Ip;/^Generation:/Ip;/^Metageneration:/Ip;/^Update time:/Ip'
-            echo "::endgroup::"
-          done
-
-      # 👀 Mostrar qué URIs referencia el manifest subido (deberían ser gs://...)
-      - name: Show manifest resource URIs
-        shell: bash
-        run: |
-          set -e
-          if command -v jq >/dev/null 2>&1; then
-            echo "::group::manifest.json (components[0].resource)"
-            gsutil cat "$BUCKET_PATH/manifest.json" | jq -r '.components[0].resource | to_entries[] | "\(.key): \(.value)"'
-            echo "::endgroup::"
+              cp dist/Visualization.css "${{ steps.pkg.outputs.PKG_PATH }}Visualization.css"
           else
-            echo "jq no está disponible; omitiendo inspección de manifest."
+            echo "No hay Visualization.css, se omite."
           fi
+
+      - name: "Upload config.json"
+        run: |
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp "${MANIFEST_PATH%/*}/${CONFIG_NAME}" "${{ steps.pkg.outputs.PKG_PATH }}${CONFIG_NAME}"
+
+      - name: "Upload manifest.json"
+        run: |
+          gsutil -m -h "Cache-Control:no-store" -h "Content-Type: application/json" \
+            cp "${MANIFEST_PATH}" "${{ steps.pkg.outputs.PKG_PATH }}manifest.json"
+
+       (Opcional) Hacer objetos públicos si el bucket no es público
+       - name: "Make objects public (optional)"
+         run: |
+           gsutil iam ch allUsers:objectViewer "gs://${BUCKET}"
+
+      - name: "Show manifest (debug)"
+        run: |
+          gsutil cp "${{ steps.pkg.outputs.PKG_PATH }}manifest.json" - | head -n 80
+          echo "Listando carpeta:"
+          gsutil ls -l "${{ steps.pkg.outputs.PKG_PATH }}"
