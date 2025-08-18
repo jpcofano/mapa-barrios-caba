@@ -1,52 +1,52 @@
-// NUEVO: trae la API desde el paquete
-// Bundlea la lib de DSCC en tu Visualization.js
-//import * as dscc from '@google/dscc';
+// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador de datos
+
+import * as dsccImported from '@google/dscc';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
 import geojsonText from './barrioscaba.geojson?raw';
-// --- DSCC ADAPTER 2025 (bundle-first, host-safe) ---
-import * as dsccImported from '@google/dscc';
 
-
-function _getDsccNow() {
-  if (dsccImported && typeof dsccImported.subscribeToData === 'function') return dsccImported;
-  if (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
-  return null;
-}
-
-// inyecta a window si está el módulo bundleado
-(function(){
-  try{
-    if (typeof window !== 'undefined' && !window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
+/* ----------------------------------------------------------------------------
+   Exponer el import a window si el host no lo pone (evita doble definición)
+---------------------------------------------------------------------------- */
+(function exposeImportToWindowIfNeeded() {
+  if (typeof window !== 'undefined') {
+    if (!window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
       window.dscc = dsccImported;
     }
-  }catch(e){}
+  }
 })();
 
-// espera a que dscc esté listo
-function _waitForDscc(maxMs=4000, interval=40){
-  return new Promise((resolve,reject)=>{
-    const t0 = (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
-    (function loop(){
-      const d = _getDsccNow();
+/* ----------------------------------------------------------------------------
+   Espera a que dscc esté listo (importado o provisto por el host)
+---------------------------------------------------------------------------- */
+function waitForDscc(maxMs = 4000, interval = 40) {
+  return new Promise((resolve, reject) => {
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    (function loop() {
+      const d =
+        (dsccImported && typeof dsccImported.subscribeToData === 'function') ? dsccImported :
+        (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
+        null;
       if (d) return resolve(d);
-      const now = (typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
+      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
       if (now - t0 > maxMs) return reject(new Error('dscc no está listo'));
       setTimeout(loop, interval);
     })();
   });
 }
 
-// inyección opcional del script oficial si no aparece
-const _ensureDsccScript = (() => {
-  let injected=false;
+/* ----------------------------------------------------------------------------
+   Inyección opcional de la lib oficial si el host no la expuso aún
+---------------------------------------------------------------------------- */
+const ensureDsccScript = (() => {
+  let injected = false;
   return () => {
-    if (typeof window==='undefined') return false;
+    if (typeof window === 'undefined') return false;
     if (typeof window.dscc?.subscribeToData === 'function') return true;
     if (injected) return false;
-    const ex = document.getElementById('__dscc_script');
-    if (ex) { injected = true; return false; }
+    const existing = document.getElementById('__dscc_script');
+    if (existing) { injected = true; return false; }
     const s = document.createElement('script');
     s.id = '__dscc_script';
     s.src = 'https://www.gstatic.com/looker-studio/js/dscc.min.js';
@@ -58,38 +58,38 @@ const _ensureDsccScript = (() => {
   };
 })();
 
-// ---------------------- SANITIZADOR SUAVE (no depende de que haya query) ----------------------
+/* ----------------------------------------------------------------------------
+   Sanitizador “suave” de NBSP / espacios en vizId/js/css
+---------------------------------------------------------------------------- */
 (function () {
   try {
-    const fixOne = (val) => {
-      if (!val) return val;
-      return String(val).replace(
-        /(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i,  // gs://bucket/<carpeta> + NBSP/espacio
-        (_m, g1) => g1 + '/'
-      );
+    const fix = (v) => {
+      if (!v) return v;
+      return String(v)
+        .replace(/\u00A0/g, '')     // NBSP
+        .replace(/\s+/g, '')        // espacios
+        .replace(/(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i, (_m, g1) => g1 + '/');
     };
-
-    const rawQ = window.location.search || '';
-    const usp = new URLSearchParams(rawQ);
-    const keys = ['vizId', 'js', 'css'];
+    const q = window.location.search || '';
+    const usp = new URLSearchParams(q);
     let changed = false;
-
-    for (const k of keys) {
+    for (const k of ['vizId','js','css','path']) {
       if (!usp.has(k)) continue;
       const before = usp.get(k);
-      const after = fixOne(before);
+      const after  = fix(before);
       if (after !== before) { usp.set(k, after); changed = true; }
     }
-
     if (changed) {
-      const q = usp.toString();
-      history.replaceState(null, '', (q ? '?' + q : location.pathname));
-      console.log('[Viz] Query saneada: antes=' + rawQ + ', después=' + usp.toString());
+      const qs = usp.toString();
+      history.replaceState(null,'', qs ? ('?' + qs) : location.pathname);
+      console.log('[Viz] Query saneada');
     }
-  } catch (e) { console.error('[Viz] Sanitizador URL error:', e); }
+  } catch (e) { console.warn('[Viz] Sanitizador URL error:', e); }
 })();
 
-// ---------------------- GEOJSON ----------------------
+/* ----------------------------------------------------------------------------
+   GeoJSON embebido (Vite: ?raw devuelve string)
+---------------------------------------------------------------------------- */
 let GEOJSON;
 try {
   GEOJSON = JSON.parse(geojsonText);
@@ -98,7 +98,9 @@ try {
   GEOJSON = { type: 'FeatureCollection', features: [] };
 }
 
-// ---------------------- HELPERS ----------------------
+/* ----------------------------------------------------------------------------
+   Helpers de texto / color
+---------------------------------------------------------------------------- */
 function cleanString(s) {
   return String(s ?? '')
     .normalize('NFD')
@@ -154,7 +156,9 @@ const PRESET_PALETTES = {
   oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04']
 };
 
-// ---------------------- STYLE (alineado a config.json) ----------------------
+/* ----------------------------------------------------------------------------
+   Lectura de estilo (alineado a config.json)
+---------------------------------------------------------------------------- */
 function readStyle(message = {}) {
   const s = (message && message.styleById) ? message.styleById : {};
 
@@ -167,7 +171,6 @@ function readStyle(message = {}) {
         .map(x => x.startsWith('#') ? x : '#' + x);
       if (colors.length) return { mode: 'custom', colors };
     }
-
     const v = s.colorPalette && s.colorPalette.value;
     if (v) {
       if (typeof v === 'string') {
@@ -207,7 +210,9 @@ function readStyle(message = {}) {
   };
 }
 
-// ---------------------- Feature name ----------------------
+/* ----------------------------------------------------------------------------
+   Propiedad de nombre por feature
+---------------------------------------------------------------------------- */
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
   if (customProp && (customProp in p)) return p[customProp];
@@ -230,7 +235,9 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
   return anyStr ?? '—';
 }
 
-// ---------------------- Números/tabla ----------------------
+/* ----------------------------------------------------------------------------
+   Números/tabla + Normalizador robusto de DEFAULT
+---------------------------------------------------------------------------- */
 function toNumberLoose(x) {
   if (typeof x === 'number') return x;
   const cand = x?.v ?? x?.value ?? x;
@@ -244,48 +251,63 @@ function toNumberLoose(x) {
   return Number.isFinite(n) ? n : NaN;
 }
 
-function normalizeTable(defaultTable, fields = {}) {
-  let headers = Array.isArray(defaultTable.headers)
-    ? defaultTable.headers
-    : (Array.isArray(defaultTable.fields) ? defaultTable.fields : []);
-  let rows = Array.isArray(defaultTable.rows) ? defaultTable.rows : [];
-
-  if ((!headers || !headers.length) && rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
-    const keys = Object.keys(rows[0]);
-    headers = keys.map(k => ({ id: k, name: k }));
-  }
-
-  if (rows.length && !Array.isArray(rows[0]) && typeof rows[0] === 'object') {
-    rows = rows.map(obj =>
-      headers.map(h => obj[h.id] ?? obj[h.name] ?? null)
-    );
-  }
-
-  const prettyHeaders = headers.map(h => ({
-    id: h.id ?? h.name,
-    name: fields.dimensions?.find(d => d.id === h.id)?.name ||
-          fields.metrics?.find(m => m.id === h.id)?.name ||
-          h.name || h.id
-  }));
-
-  return { headers: prettyHeaders, rows };
+/** Coercea celdas {v:...} o valores directos */
+function coerceCell(c) {
+  return (c && typeof c === 'object' && 'v' in c) ? c.v : c;
 }
 
-function buildValueMap(message) {
-  const fbc = message?.fieldsByConfigId || {};
-  const fields = message?.fields || {};
-  const tableRaw = message?.tables?.DEFAULT || {};
-  const { headers, rows } = normalizeTable(tableRaw, fields);
+/**
+ * Normaliza la tabla DEFAULT de objectTransform:
+ * - Usa t.headers para obtener ids/names
+ * - Soporta rows como array o como objeto indexado por id
+ * Devuelve { ids[], names[], rows[] } donde rows[i] = { __vals:[], byName:{}, byId:{} }
+ */
+function normalizeDEFAULTTable(data) {
+  const t = data?.tables?.DEFAULT;
+  if (!t) return { ids: [], names: [], rows: [] };
 
-  console.log('[Viz] table keys:', Object.keys(tableRaw));
-  console.log('[Viz] fields/headers:', headers.map(f => f?.id || f?.name));
-  console.log('[Viz] rows.length:', rows.length);
-  console.log('[Viz] fieldsByConfigId:', Object.keys(fbc));
+  const hdrObjs = (t.headers || []).map(h => (typeof h === 'string' ? { id: h, name: h } : h));
+  const ids   = hdrObjs.map(h => h.id ?? String(h.name ?? h.label));
+  const names = hdrObjs.map(h => h.name ?? h.label ?? h.id);
 
+  const rows = (t.rows || []).map(row => {
+    let values;
+    if (Array.isArray(row)) {
+      values = row.map(coerceCell);
+    } else {
+      values = ids.map(id => coerceCell(row[id]));
+    }
+    const byName = Object.fromEntries(names.map((nm, i) => [nm, values[i]]));
+    const byId   = Object.fromEntries(ids.map((id, i)   => [id, values[i]]));
+    return { __vals: values, byName, byId };
+  });
+
+  return { ids, names, rows };
+}
+
+/** Convierte una tabla normalizada a {headers, rows} que consume el renderer */
+function toHeadersRows(norm) {
+  const headers = norm.ids.map((id, i) => ({ id, name: norm.names[i] || id }));
+  const rows = norm.rows.map(r => r.__vals);
+  return { headers, rows };
+}
+
+/* ----------------------------------------------------------------------------
+   ValueMap: mapea dimensión → valor usando ids/labels de config
+---------------------------------------------------------------------------- */
+function buildValueMap(tableLike) {
+  const fbc    = tableLike?.fieldsByConfigId || {};
+  const fields = tableLike?.fields || {};
+  const tableRaw = tableLike?.tables?.DEFAULT || {};
+  const headers = tableRaw.headers || [];
+  const rows    = tableRaw.rows || [];
+
+  // indices por preferencia (config → fields → heurística)
   let idxDim = -1, idxMet = -1;
 
   const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
   const metIdPref = fbc.metricPrimary?.[0]?.id || fbc.metricPrimary?.[0]?.name;
+
   if (dimIdPref) idxDim = headers.findIndex(h => (h.id || h.name) === dimIdPref);
   if (metIdPref) idxMet = headers.findIndex(h => (h.id || h.name) === metIdPref);
 
@@ -319,7 +341,7 @@ function buildValueMap(message) {
   if (idxDim < 0 || idxMet < 0) {
     console.warn('[Viz] No se encontraron campos válidos para dimensión/métrica', { idxDim, idxMet });
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
-  }
+    }
 
   const map = new Map();
   const values = [];
@@ -344,12 +366,15 @@ function buildValueMap(message) {
   const min = values.length ? Math.min(...values) : NaN;
   const max = values.length ? Math.max(...values) : NaN;
 
-  console.log('[Viz] sample map entries:', Array.from(map.entries()).slice(0, 5));
+  console.log('[Viz] headers:', headers.map(h => h.name || h.id));
+  console.log('[Viz] rows:', rows.length, 'idxDim:', idxDim, 'idxMet:', idxMet);
   console.log('[Viz] min/max/count:', min, max, values.length);
   return { map, min, max, count: values.length };
 }
 
-// ---------------------- Render ----------------------
+/* ----------------------------------------------------------------------------
+   Render principal (Leaflet)
+---------------------------------------------------------------------------- */
 const __leafletState = { map: null, layer: null, legend: null };
 
 export default function drawVisualization(container, message = {}) {
@@ -377,9 +402,11 @@ export default function drawVisualization(container, message = {}) {
 
   const style  = readStyle(message);
   const nivel  = style.nivelJerarquia || 'barrio';
+
   const stats  = buildValueMap(message);
   const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
 
+  // Mapa único reutilizable
   if (!__leafletState.map) {
     __leafletState.map = L.map(container, { zoomControl: true, attributionControl: true });
   } else {
@@ -388,17 +415,14 @@ export default function drawVisualization(container, message = {}) {
       container.appendChild(current);
       setTimeout(() => { try { __leafletState.map.invalidateSize(); } catch {} }, 0);
     }
-    if (__leafletState.layer) {
-      try { __leafletState.map.removeLayer(__leafletState.layer); } catch {}
-      __leafletState.layer = null;
-    }
-    if (__leafletState.legend) {
-      try { __leafletState.legend.remove(); } catch {}
-      __leafletState.legend = null;
-    }
+    if (__leafletState.layer) { try { __leafletState.map.removeLayer(__leafletState.layer); } catch {} }
+    if (__leafletState.legend) { try { __leafletState.legend.remove(); } catch {} }
+    __leafletState.layer = null;
+    __leafletState.legend = null;
   }
   const map = __leafletState.map;
 
+  // Estilo por feature
   const styleFn = (feature) => {
     const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
     let v;
@@ -457,6 +481,7 @@ export default function drawVisualization(container, message = {}) {
   }).addTo(map);
   __leafletState.layer = layer;
 
+  // Ajuste de vista
   try {
     const b = layer.getBounds();
     if (b?.isValid && b.isValid()) {
@@ -469,6 +494,7 @@ export default function drawVisualization(container, message = {}) {
     console.warn('[Viz] No se pudo ajustar bounds:', e);
   }
 
+  // Leyenda
   if (style.showLegend) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
@@ -530,7 +556,9 @@ export default function drawVisualization(container, message = {}) {
   }
 }
 
-// ---------------------- formato ----------------------
+/* ----------------------------------------------------------------------------
+   Utilidad de formateo
+---------------------------------------------------------------------------- */
 function fmt(n) {
   if (!Number.isFinite(n)) return 's/d';
   const abs = Math.abs(n);
@@ -540,7 +568,9 @@ function fmt(n) {
   return (Math.round(n * 100) / 100).toString();
 }
 
-// ---------------------- Wrapper dscc ----------------------
+/* ----------------------------------------------------------------------------
+   Wrapper dscc: subscribe con objectTransform + normalizador
+---------------------------------------------------------------------------- */
 (function () {
   'use strict';
 
@@ -558,58 +588,34 @@ function fmt(n) {
 
   function handleData(data) {
     try {
-      console.group('[Viz] Datos con objectTransform');
-      try { window.__lastData = data; } catch {}
+      console.group('[Viz] Datos (objectTransform)');
 
-      const byId = data?.fieldsByConfigId || {};
-      const dims = byId.geoDimension || byId.dimensions || [];
-      const mets = byId.metricPrimary || byId.metrics || [];
-
-      const headers = [...dims, ...mets].map(f => ({
-        id: f.id || f.name,
-        name: f.name || f.id
-      }));
-
-      const rowsObj = Array.isArray(data?.tables?.DEFAULT?.rows)
-        ? data.tables.DEFAULT.rows
-        : (Array.isArray(data?.tables?.DEFAULT) ? data.tables.DEFAULT : []);
-      const rows = rowsObj.map(rowObj =>
-        headers.map(h => {
-          const v = rowObj?.[h.id];
-          const cell = Array.isArray(v) ? v[0] : v;
-          return (cell && typeof cell === 'object') ? (cell.v ?? cell.value ?? cell) : cell;
-        })
-      );
-
-      console.group('[Viz] Preview (tabla normalizada)');
-      console.log(`Dimensiones (${dims.length}):`, dims.map(d => d.name));
-      console.log(`Métricas    (${mets.length}):`, mets.map(m => m.name));
-      console.log('Headers:', headers.map(h => h.name));
-      console.log('Rows:', rows.length);
-      const sampleCount = Math.min(5, rows.length);
-      if (sampleCount > 0) {
-        const sampleTable = rows.slice(0, sampleCount).map(r =>
-          Object.fromEntries(headers.map((h, idx) => [h.name, r[idx]]))
-        );
-        console.table(sampleTable);
+      // Normalizar tabla DEFAULT (ids, labels y filas seguras)
+      const norm = normalizeDEFAULTTable(data);
+      if (norm.rows.length) {
+        console.log('[Viz] headers (ids):', norm.ids);
+        console.log('[Viz] headers (labels):', norm.names);
+        console.log('[Viz] rows:', norm.rows.length);
+        console.log('[Viz] fila 1 (byName):', norm.rows[0].byName);
       } else {
-        console.warn('[Viz] La tabla normalizada no contiene filas.');
+        console.warn('[Viz] Sin filas en DEFAULT');
       }
-      console.groupEnd();
 
+      // Convertir a headers/rows para el renderer
+      const { headers, rows } = toHeadersRows(norm);
+
+      // Armar tableLike con metadata original (para mapear config ids)
       const tableLike = {
-        fields: { dimensions: dims, metrics: mets },
+        fields: data.fields || {},
         tables: { DEFAULT: { headers, rows } },
         fieldsByConfigId: data.fieldsByConfigId || {},
         styleById: data.styleById || {}
       };
-      try { window.__lastTableLike = tableLike; } catch {}
 
       drawVisualization(ensureContainer(), tableLike);
-
       console.groupEnd();
     } catch (err) {
-      console.error('[Viz] Error procesando datos (object→table):', err);
+      console.error('[Viz] Error procesando datos:', err);
     }
   }
 
@@ -617,93 +623,30 @@ function fmt(n) {
     try {
       const MAX_ATTEMPTS = 5;
 
-      if (window.parent !== window) {
-        console.log('[Viz] Cargado en iframe – dscc debería inyectarse o venir bundleado.');
-      } else {
-        console.warn('[Viz] No en iframe – dscc del host no se inyectará. Usá un informe real o mock.');
-      }
-
-      // --- diagnóstico seguro ---
-      const dsccModule = dsccImported;
-      const dsccModuleExists   = (typeof dsccModule !== 'undefined') && !!dsccModule;
-      const dsccModuleSubType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.subscribeToData : 'undefined';
-      const dsccModuleObjType  = (typeof dsccModule !== 'undefined') ? typeof dsccModule?.objectTransform  : 'undefined';
-
-      const _diag = (tag) => {
-        console.log(`[Diag ${tag}]`, {
-          time: new Date().toISOString(),
-          dsccWindowExists: !!window.dscc,
-          dsccWindowSubscribeType: typeof window.dscc?.subscribeToData,
-          dsccModuleExists,
-          dsccModuleSubscribeType: dsccModuleSubType,
-          dsccModuleObjectTransform: dsccModuleObjType,
-          locationHref: location.href,
-          referrer: document.referrer,
-          attempt
-        });
-      };
-
-      _diag(`attempt-${attempt}`);
-
-      // --- resolución segura del proveedor dscc (módulo → window → null) ---
-      const dsccResolved =
-        (dsccModuleExists && dsccModuleSubType === 'function') ? dsccModule :
-        (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
-        null;
-
-      if (dsccResolved && typeof dsccResolved.subscribeToData === 'function') {
-        const from = (dsccModuleExists && dsccResolved === dsccModule) ? 'module'
-                 : (dsccResolved === window.dscc) ? 'window'
-                 : 'unknown';
-
-        console.log(`[Viz] dscc disponible en attempt ${attempt}`, {
-          dsccFrom: from,
-          subscribeType: typeof dsccResolved.subscribeToData,
-          hasObjectTransform: typeof dsccResolved.objectTransform === 'function'
-        });
-
-        // Suscripción usando la función extraída
-        dsccResolved.subscribeToData(
-          handleData,
-          { transform: dsccResolved.objectTransform }
-        );
-
+      const d = await waitForDscc().catch(() => null);
+      if (d && typeof d.subscribeToData === 'function') {
+        console.log('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
+        d.subscribeToData(handleData, { transform: d.objectTransform });
         return;
       }
 
-      // Si todavía no hay dscc, intentá inyectar la lib oficial y reintentar
-      _ensureDsccScript();
+      ensureDsccScript();
       if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[Viz] dscc no disponible en attempt ${attempt}, reintentando en 1s...`, {
-          dsccModuleSubscribe: dsccModuleSubType,
-          dsccWindowSubscribe: typeof window.dscc?.subscribeToData
-        });
+        console.warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
         setTimeout(() => initWrapper(attempt + 1), 1000);
         return;
       }
 
       // Fallback (mock)
-      console.error('[Viz] dscc no disponible tras 5 intentos. Entrando en fallback (mock).');
-
+      console.error('[Viz] dscc no disponible tras reintentos. Fallback mock.');
       const container = ensureContainer();
-      container.innerHTML = `
-        <div style="font:14px system-ui; padding:12px; border:1px solid #eee; border-radius:8px; margin-bottom:8px">
-          <strong>Sin dscc:</strong> No se pudo inicializar la API de Looker Studio.<br/>
-          Revisá:
-          <ul style="margin:6px 0 0 18px">
-            <li>Que el manifiesto sea el correcto y la viz esté agregada desde ese manifest.</li>
-            <li>Que la fuente de datos tenga habilitado <em>Community visualization access</em>.</li>
-            <li>Que <code>config.json</code> no tenga <code>defaultValue</code> en <code>data.elements</code> (solo en <code>style</code>).</li>
-          </ul>
-        </div>`;
-
       const mockData = {
         tables: {
           DEFAULT: {
-            fields: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
+            headers: [{id:'barrio',name:'Barrio'},{id:'poblacion',name:'Población'}],
             rows: [
-              { barrio: 'Palermo',  poblacion: 225000 },
-              { barrio: 'Recoleta', poblacion: 188000 }
+              ['Palermo', 225000],
+              ['Recoleta',188000]
             ]
           }
         },
@@ -712,7 +655,6 @@ function fmt(n) {
           metricPrimary: [{ id: 'poblacion', name: 'Población' }]
         }
       };
-
       drawVisualization(container, mockData);
     } catch (e) {
       console.error('[Viz] Error initWrapper:', e);
@@ -720,10 +662,8 @@ function fmt(n) {
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      try { console.log('[Viz] DOMContentLoaded → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
-    });
+    document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(console.error); });
   } else {
-    try { console.log('[Viz] DOM listo → initWrapper()'); initWrapper(); } catch (e) { console.error(e); }
+    initWrapper().catch(console.error);
   }
 })();

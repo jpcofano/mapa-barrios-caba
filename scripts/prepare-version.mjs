@@ -1,8 +1,8 @@
 // scripts/prepare-version.mjs
-// Prepara <prefix>-<version>/ y genera manifest.json (gs:// u https://).
+// Genera <prefix>-<version>/ y crea manifest.json
 // - Sanea NBSP/espacios y caracteres raros en prefix/version
-// - Alinea packageUrl con el esquema elegido (--scheme gs|https)
-// - Respeta devMode, configName, setIdToFolder, manifestPath
+// - packageUrl usa scheme (por defecto gs)
+// - resources: SIEMPRE ABSOLUTOS con gs://<bucket>/<folder>/...  (como solicitaste)
 
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, resolve } from 'path';
@@ -39,7 +39,7 @@ const toBool = (v, d=false) => {
 };
 const ensureSlash = (u) => (u.endsWith("/") ? u : u + "/");
 
-// --- Sanitizador duro: NBSP/espacios fuera y solo [A-Za-z0-9._-] ---
+// --- Sanitizador NBSP/espacios/raros → solo [A-Za-z0-9._-] ---
 const NBSP_RE = /\u00A0/g;
 function sanitizeArg(x) {
   if (x == null) return "";
@@ -65,34 +65,33 @@ if (!prefixRaw)  { console.error("Falta --prefix"); process.exit(1); }
 if (!versionRaw) { console.error("Falta --version"); process.exit(1); }
 
 // Saneo
-const prefix        = sanitizeArg(prefixRaw);
-const version       = sanitizeArg(versionRaw);
-const folderName    = `${prefix}-${version}`;
+const prefix     = sanitizeArg(prefixRaw);
+const version    = sanitizeArg(versionRaw);
+const folderName = `${prefix}-${version}`;
 
-// Bases absolutas
+// Bases
 const HTTPS_BASE = `https://storage.googleapis.com/${bucket}/${folderName}`;
 const GS_BASE    = `gs://${bucket}/${folderName}`;
-const baseAbs    = scheme === "gs" ? GS_BASE : HTTPS_BASE;      // para js/css/config
-const PACKAGE_BASE = scheme === "gs" ? GS_BASE : HTTPS_BASE;    // para packageUrl
+const PACKAGE_BASE = scheme === "gs" ? GS_BASE : HTTPS_BASE;  // packageUrl según scheme
 
 // ------------------ manifest ------------------
+// IMPORTANTE: resources ABSOLUTOS con gs:// (siempre)
 const manifest = {
   name: "Barrios CABA Map",
   version: version,
   organization: "Tu Org",
   description: "Mapa de barrios CABA con coropletas",
-  logoUrl: `https://storage.googleapis.com/${bucket}/Logo.png`, // imágenes en https
+  logoUrl: `https://storage.googleapis.com/${bucket}/Logo.png`,
   packageUrl: ensureSlash(PACKAGE_BASE),
   components: [{
     id: setIdToFolder ? folderName : "viz",
     name: "Barrios / Comunas CABA",
     iconUrl: `https://storage.googleapis.com/${bucket}/Icon.png`,
     description: "Coropletas, etiquetas y leyenda configurables",
-    // Recursos relativos a packageUrl (recomendado)
     resource: {
-      js: "Visualization.js",
-      css: "Visualization.css",
-      config: configName
+      js:    `${ensureSlash(GS_BASE)}Visualization.js`,
+      css:   `${ensureSlash(GS_BASE)}Visualization.css`,
+      config:`${ensureSlash(GS_BASE)}${configName}`
     }
   }],
   devMode: devMode
@@ -115,5 +114,7 @@ console.log("configName:     ", configName);
 console.log("setIdToFolder:  ", setIdToFolder);
 console.log("devMode:        ", devMode);
 console.log("packageUrl:     ", manifest.packageUrl);
-console.log("js/css/config:  ", `${baseAbs}/Visualization.js`, `${baseAbs}/Visualization.css`, `${baseAbs}/${configName}`);
+console.log("resource.js:    ", manifest.components[0].resource.js);
+console.log("resource.css:   ", manifest.components[0].resource.css);
+console.log("resource.config:", manifest.components[0].resource.config);
 console.log("manifestPath:   ", outFile);
