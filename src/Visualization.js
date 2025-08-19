@@ -185,7 +185,25 @@ Object.assign(PRESET_PALETTES, {
   plasma:  ['#0d0887','#5b02a3','#9a179b','#cb4679','#ed7953','#fb9f3a','#fdca26','#f0f921'],
   cividis: ['#00224e','#233b67','#3f5a78','#5a7b89','#7a9c98','#9fbc9f','#c9dca0','#f2f4b3'],
   turbo:   ['#23171b','#3b0f70','#6a00a8','#9c179e','#bd3786','#d8576b','#ed7953','#fb9f3a','#fdca26','#f0f921'],
-  Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2']
+  Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2'],
+
+  // 🔶 Monocromática: máximos = #FFFF00
+  soloAmarillo: [
+    '#FFFFF2','#FFFFE6','#FFFFCC','#FFFFB3','#FFFF99','#FFFF66','#FFFF33','#FFFF00'
+  ],
+
+  // 🌊❄️→🌿→🔆 Frío a amarillo puro: máximos = #FFFF00
+  coolToYellow: [
+    '#08306B', // azul oscuro
+    '#08519C', // azul
+    '#2171B5', // azul medio
+    '#41B6C4', // cian
+    '#7FCDBB', // cian verdoso
+    '#C7E9B4', // verde pálido
+    '#FFFFCC', // amarillo muy claro
+    '#FFFF66', // amarillo limón
+    '#FFFF00'  // amarillo puro (máximos)
+  ]
 });
 
 // --- Utilidades para interpolar colores hex ---

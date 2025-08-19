@@ -7,16 +7,12 @@
         {
           "id": "geoDimension",
           "label": "Dimensión geográfica (Barrio/Comuna)",
-          "type": "DIMENSION",
-          "min": 1,
-          "max": 1
+          "type": "DIMENSION"
         },
         {
           "id": "metricPrimary",
           "label": "Métrica principal (para colorear)",
-          "type": "METRIC",
-          "min": 1,
-          "max": 1
+          "type": "METRIC"
         }
       ]
     }
@@ -29,7 +25,7 @@
         {
           "id": "nivelJerarquia",
           "label": "Nivel",
-          "type": "SELECT",
+          "type": "SELECT_SINGLE",
           "options": [
             { "label": "Barrio", "value": "barrio" },
             { "label": "Comuna", "value": "comuna" }
@@ -51,7 +47,7 @@
         {
           "id": "colorScale",
           "label": "Escala base",
-          "type": "SELECT",
+          "type": "SELECT_SINGLE",
           "options": [
             { "label": "Verde → Rojo",     "value": "greenToRed" },
             { "label": "Azul → Amarillo",  "value": "blueToYellow" },
@@ -69,7 +65,7 @@
         {
           "id": "colorPalette",
           "label": "Paleta (moderna)",
-          "type": "SELECT",
+          "type": "SELECT_SINGLE",
           "options": [
             { "label": "Ninguna (usar escala base)", "value": "" },
             { "label": "viridis",   "value": "viridis" },
@@ -82,7 +78,9 @@
             { "label": "Verdes",    "value": "greens" },
             { "label": "Azules",    "value": "blues" },
             { "label": "Violetas",  "value": "purples" },
-            { "label": "Naranjas",  "value": "oranges" }
+            { "label": "Naranjas",  "value": "oranges" },
+            { "label": "soloAmarillo (máximo amarillo)", "value": "soloAmarillo" },
+            { "label": "coolToYellow (frío→amarillo)",   "value": "coolToYellow" }
           ],
           "defaultValue": ""
         },
@@ -96,7 +94,7 @@
           "id": "opacity",
           "label": "Opacidad del relleno",
           "type": "OPACITY",
-          "defaultValue": 0.45
+          "defaultValue": 0.5
         },
         {
           "id": "colorMissing",
@@ -149,12 +147,12 @@
         {
           "id": "legendPosition",
           "label": "Posición de la leyenda",
-          "type": "SELECT",
+          "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Abajo derecha", "value": "bottomright" },
-            { "label": "Abajo izquierda", "value": "bottomleft" },
+            { "label": "Abajo derecha",  "value": "bottomright" },
+            { "label": "Abajo izquierda","value": "bottomleft" },
             { "label": "Arriba derecha", "value": "topright" },
-            { "label": "Arriba izquierda", "value": "topleft" }
+            { "label": "Arriba izquierda","value": "topleft" }
           ],
           "defaultValue": "bottomright"
         },
