@@ -100,7 +100,8 @@
           "id": "colorMissing",
           "label": "Color para valores faltantes",
           "type": "FILL_COLOR",
-          "defaultValue": "#cccccc"
+         // "defaultValue": "#cccccc"
+         "defaultValue": "#D9D9D9"
         }
       ]
     },
@@ -119,6 +120,7 @@
           "label": "Color del borde",
           "type": "FILL_COLOR",
           "defaultValue": "#000000"
+        // "defaultValue": "#9E9E9E"
         },
         {
           "id": "borderWidth",

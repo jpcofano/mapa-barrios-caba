@@ -1,4 +1,4 @@
-// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG + Paletas continuas
+// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG + Paletas continuas + Categorías + Tooltip=Popup
 
 import * as dsccImported from '@google/dscc';
 import L from 'leaflet';
@@ -8,9 +8,6 @@ import geojsonText from './barrioscaba.geojson?raw';
 
 /* ============================================================================
    DEBUG TOGGLE
-   - ?debug=1 activa logs detallados
-   - ?debug=0 los desactiva
-   - window.__VIZ_DEBUG (true/false) sobreescribe
 ============================================================================ */
 const DEBUG_DEFAULT = true;
 function detectDebug() {
@@ -24,9 +21,9 @@ function detectDebug() {
   return DEBUG_DEFAULT;
 }
 let DEBUG = detectDebug();
-const dbg = (...args) => { if (DEBUG) console.log(...args); };
+const dbg  = (...args) => { if (DEBUG) console.log(...args); };
 const warn = (...args) => { console.warn(...args); };
-const err = (...args) => { console.error(...args); };
+const err  = (...args) => { console.error(...args); };
 
 /* ============================================================================
    Exponer dscc importado si el host no lo publica
@@ -40,7 +37,7 @@ const err = (...args) => { console.error(...args); };
 })();
 
 /* ============================================================================
-   Espera a dscc listo
+   Espera a dscc listo + inyección opcional
 ============================================================================ */
 function waitForDscc(maxMs = 4000, interval = 40) {
   return new Promise((resolve, reject) => {
@@ -58,9 +55,6 @@ function waitForDscc(maxMs = 4000, interval = 40) {
   });
 }
 
-/* ============================================================================
-   Inyección opcional de la lib oficial si el host no la expuso aún
-============================================================================ */
 const ensureDsccScript = (() => {
   let injected = false;
   return () => {
@@ -105,7 +99,7 @@ const ensureDsccScript = (() => {
       const qs = usp.toString();
       history.replaceState(null,'', qs ? ('?' + qs) : location.pathname);
       dbg('[Viz] Query saneada');
-      DEBUG = detectDebug(); // re-eval por si cambió debug
+      DEBUG = detectDebug();
     }
   } catch (e) { warn('[Viz] Sanitizador URL error:', e); }
 })();
@@ -146,6 +140,7 @@ const lerp = (a, b, t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
 const rgb = (r, g, b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 
+/* Escalas base */
 function colorFromScale(scaleName, t, invert) {
   t = clamp01(t);
   if (invert) t = 1 - t;
@@ -194,93 +189,58 @@ Object.assign(PRESET_PALETTES, {
 
   // 🌊❄️→🌿→🔆 Frío a amarillo puro: máximos = #FFFF00
   coolToYellow: [
-    '#08306B', // azul oscuro
-    '#08519C', // azul
-    '#2171B5', // azul medio
-    '#41B6C4', // cian
-    '#7FCDBB', // cian verdoso
-    '#C7E9B4', // verde pálido
-    '#FFFFCC', // amarillo muy claro
-    '#FFFF66', // amarillo limón
-    '#FFFF00'  // amarillo puro (máximos)
+    '#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00'
   ]
 });
 
-// --- Utilidades para interpolar colores hex ---
-function hexToRgb(h){
-  const x = h.replace('#','');
-  const r = parseInt(x.slice(0,2),16), g = parseInt(x.slice(2,4),16), b = parseInt(x.slice(4,6),16);
-  return [r,g,b];
-}
-function rgbToHex([r,g,b]) {
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-}
-function lerpRgb(a,b,t){
-  const A = hexToRgb(a), B = hexToRgb(b);
-  return rgbToHex([ A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t ]);
-}
-
-// Interpola de forma continua a lo largo de una paleta de N colores
+// --- Utilidades color hex ---
+function hexToRgb(h){ const x = h.replace('#',''); return [parseInt(x.slice(0,2),16), parseInt(x.slice(2,4),16), parseInt(x.slice(4,6),16)]; }
+function rgbToHex([r,g,b]) { const toHex = (n)=>Math.round(n).toString(16).padStart(2,'0'); return `#${toHex(r)}${toHex(g)}${toHex(b)}`; }
+function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([ A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t ]); }
 function samplePaletteContinuous(colors, t){
   if (!colors || !colors.length) return '#cccccc';
   if (colors.length === 1) return colors[0];
   const pos = clamp01(t) * (colors.length - 1);
-  const i = Math.floor(pos);
-  const f = pos - i;
-  const c0 = colors[i];
-  const c1 = colors[Math.min(i+1, colors.length - 1)];
-  return lerpRgb(c0, c1, f);
+  const i = Math.floor(pos), f = pos - i;
+  return lerpRgb(colors[i], colors[Math.min(i+1, colors.length-1)], f);
 }
-
-// Color master: usa paleta continua si hay (respetando invert), si no la escala base
 function getColorFromScaleOrPalette(t, style) {
   let u = clamp01(t);
   if (style?.invertScale) u = 1 - u;
-
   const pal = style?.colorPalette?.colors;
-  if (Array.isArray(pal) && pal.length) {
-    return samplePaletteContinuous(pal, u);
-  }
-  return colorFromScale(style?.colorScale || 'greenToRed', u, /*invertAlreadyHandled*/ false);
+  if (Array.isArray(pal) && pal.length) return samplePaletteContinuous(pal, u);
+  return colorFromScale(style?.colorScale || 'greenToRed', u, false);
 }
 
 /* ============================================================================
-   Estilos desde config.json
+   Estilos desde config.json (robusto)
 ============================================================================ */
 function readStyle(message = {}) {
   const s = (message && (message.styleById || message.style)) ? (message.styleById || message.style) : {};
   const num = (x,d) => { const n = Number(x?.value ?? x); return Number.isFinite(n) ? n : d; };
-
-  const getPalette = () => {
-    const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
-    if (raw) {
-      const colors = raw.split(',')
-        .map(x => x.trim())
-        .filter(x => /^#?[0-9a-f]{6}$/i.test(x))
-        .map(x => x.startsWith('#') ? x : '#' + x);
-      if (colors.length) return { mode: 'custom', colors };
-    }
-    const v = s.colorPalette && s.colorPalette.value;
-    if (v) {
-      if (typeof v === 'string') {
-        if (PRESET_PALETTES[v]) return { mode: 'preset', colors: PRESET_PALETTES[v] };
-        if (/^#?[0-9a-f]{6}$/i.test(v)) {
-          return { mode: 'custom', colors: [ v.startsWith('#') ? v : ('#' + v) ] };
-        }
-        return { mode: 'custom', colors: [] };
-      }
-      const colors = (v.colors || v.palette || v.values || []);
-      return { mode: (v.mode || 'custom'), colors: Array.isArray(colors) ? colors : [] };
-    }
-    return null;
-  };
-
-  // Aceptar colores tanto como {value:{color:"#hex"}} como "#hex" directo
   const readColor = (node, fallback) => {
     const val = node?.value ?? node;
     if (typeof val === 'string') return val;
     if (val && typeof val === 'object' && typeof val.color === 'string') return val.color;
     return fallback;
+  };
+  const getPalette = () => {
+    const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
+    if (raw) {
+      const colors = raw.split(',').map(x=>x.trim()).filter(x=>/^#?[0-9a-f]{6}$/i.test(x)).map(x=>x.startsWith('#')?x:'#'+x);
+      if (colors.length) return { mode:'custom', colors };
+    }
+    const v = s.colorPalette && s.colorPalette.value;
+    if (v) {
+      if (typeof v === 'string') {
+        if (PRESET_PALETTES[v]) return { mode:'preset', colors: PRESET_PALETTES[v] };
+        if (/^#?[0-9a-f]{6}$/i.test(v)) return { mode:'custom', colors:[v.startsWith('#')?v:'#'+v] };
+        return { mode:'custom', colors:[] };
+      }
+      const colors = (v.colors || v.palette || v.values || []);
+      return { mode:(v.mode||'custom'), colors: Array.isArray(colors)? colors : [] };
+    }
+    return null;
   };
 
   return {
@@ -302,12 +262,27 @@ function readStyle(message = {}) {
     colorMissing: readColor(s.colorMissing, '#cccccc'),
 
     popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
+    tooltipFormat: (s.tooltipFormat && s.tooltipFormat.value) || '',
+
     colorPalette: getPalette(),
+
+    // ===== Categorías (opcional) =====
+    categoryMode: !!(s.categoryMode && s.categoryMode.value),
+    cat1Label: (s.category1Label && s.category1Label.value) || 'Categoría 1',
+    cat1Value: num(s.category1Value, 1),
+    cat1Color: readColor(s.category1Color, '#F4B400'), // amarillo
+    cat2Label: (s.category2Label && s.category2Label.value) || 'Categoría 2',
+    cat2Value: num(s.category2Value, 2),
+    cat2Color: readColor(s.category2Color, '#3F51B5'), // indigo
+    cat3Label: (s.category3Label && s.category3Label.value) || 'Categoría 3',
+    cat3Value: num(s.category3Value, 3),
+    cat3Color: readColor(s.category3Color, '#00ACC1'), // teal
+    categoryOtherColor: readColor(s.categoryOtherColor, '#E0E0E0')
   };
 }
 
 /* ============================================================================
-   Propiedad de nombre por feature (barrio/comuna)
+   Nombres de feature
 ============================================================================ */
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
@@ -320,13 +295,8 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
     return /^\d+$/.test(s) ? s.replace(/^0+/, '') : s;
   }
 
-  const candidates = [
-    p.nombre, p.NOMBRE, p.Nombre,
-    p.barrio, p.BARRIO, p.Barrio,
-    p.name, p.NOMBRE_BARRIO, p.barrio_nombre, p.barrio_desc
-  ];
+  const candidates = [ p.nombre, p.NOMBRE, p.Nombre, p.barrio, p.BARRIO, p.Barrio, p.name, p.NOMBRE_BARRIO, p.barrio_nombre, p.barrio_desc ];
   for (const c of candidates) if (c != null && String(c).trim().length) return c;
-
   const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
   return anyStr ?? '—';
 }
@@ -349,24 +319,19 @@ function toNumberLoose(x) {
 const coerceCell = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
 
 /**
- * Normaliza la tabla DEFAULT:
- * - Completa ids faltantes mapeando name -> id (qt_*) desde data.fields
- * - Soporta filas array, objeto por id, objeto estilo DataTable (row.c), o índices "0","1"
- * Devuelve { ids, names, rows[]:{ __vals, byName, byId, __raw } }
+ * Normaliza la tabla DEFAULT → { ids, names, rows[]:{__vals, byName, byId, __raw} }
  */
 function normalizeDEFAULTTable(data) {
   const T = data?.tables?.DEFAULT;
   if (!T) return { ids: [], names: [], rows: [] };
 
-  // Caso 1: {headers, rows} clásico
+  // Caso 1: {headers, rows}
   if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
     const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
     let ids   = hdrObjs.map(h => h.id ?? null);
     const names = hdrObjs.map(h => h.name ?? h.label ?? h.id ?? '');
 
-    const fieldsAll = []
-      .concat(data?.fields?.dimensions || [])
-      .concat(data?.fields?.metrics || []);
+    const fieldsAll = [].concat(data?.fields?.dimensions || [], data?.fields?.metrics || []);
     if (ids.some(id => !id) && fieldsAll.length) {
       const byName = new Map(fieldsAll.map(f => [String(f.name||'').trim(), f.id]));
       ids = ids.map((id, i) => id || byName.get(String(names[i]||'').trim()) || names[i] || '');
@@ -386,7 +351,7 @@ function normalizeDEFAULTTable(data) {
     return { ids, names, rows };
   }
 
-  // Caso 2: DEFAULT = Array o objeto "0..N"
+  // Caso 2: DEFAULT = Array u objeto "0..N"
   let rawRows = null;
   if (Array.isArray(T)) rawRows = T;
   else if (T && typeof T === 'object') {
@@ -405,19 +370,15 @@ function normalizeDEFAULTTable(data) {
   const rowsVals = rawRows.map(r => {
     if (Array.isArray(r)) return r.map(coerceCell);
     if (r && typeof r === 'object') {
-      if (Array.isArray(r.c)) return r.c.map(coerceCell);          // DataTable
+      if (Array.isArray(r.c)) return r.c.map(coerceCell);
       const keys = Object.keys(r);
-      if (keys.every(k => /^\d+$/.test(k))) {
-        return keys.sort((a,b)=>(+a)-(+b)).map(k => coerceCell(r[k]));
-      }
-      return keys.map(k => coerceCell(r[k])); // { qt_*:{v}, ... } u otros
+      if (keys.every(k => /^\d+$/.test(k))) return keys.sort((a,b)=>(+a)-(+b)).map(k => coerceCell(r[k]));
+      return keys.map(k => coerceCell(r[k]));
     }
     return [coerceCell(r)];
   });
 
-  const fieldsAll = []
-    .concat(data?.fields?.dimensions || [])
-    .concat(data?.fields?.metrics || []);
+  const fieldsAll = [].concat(data?.fields?.dimensions || [], data?.fields?.metrics || []);
   let ids = [], names = [];
   if (fieldsAll.length) {
     ids   = fieldsAll.map((f,i) => f.id || `col${i}`);
@@ -434,18 +395,16 @@ function normalizeDEFAULTTable(data) {
     byId:   Object.fromEntries(ids.map((id ,i)=>[id , vals[i]])),
     __raw: vals
   }));
-
   return { ids, names, rows };
 }
 
-/** Convierte normalizado → {headers, rows} para renderer */
 function toHeadersRows(norm) {
   const headers = norm.ids.map((id, i) => ({ id, name: norm.names[i] || id }));
   const rows = norm.rows.map(r => r.__vals);
   return { headers, rows };
 }
 
-/** Mapa valor por clave normalizada de barrio/comuna */
+/** Mapa valor por clave normalizada */
 function buildValueMap(tableLike) {
   const tableRaw = tableLike?.tables?.DEFAULT || {};
   const headers = tableRaw.headers || [];
@@ -453,14 +412,12 @@ function buildValueMap(tableLike) {
 
   let idxDim = -1, idxMet = -1;
 
-  // Preferencias desde fieldsByConfigId
   const fbc = tableLike?.fieldsByConfigId || {};
   const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
   const metIdPref = fbc.metricPrimary?.[0]?.id || fbc.metricPrimary?.[0]?.name;
   if (dimIdPref) idxDim = headers.findIndex(h => (h.id || h.name) === dimIdPref);
   if (metIdPref) idxMet = headers.findIndex(h => (h.id || h.name) === metIdPref);
 
-  // Desde fields.dimensions/metrics
   const fields = tableLike?.fields || {};
   if (idxDim < 0 && Array.isArray(fields.dimensions) && fields.dimensions.length) {
     const wanted = (fields.dimensions[0].id || fields.dimensions[0].name || '').toString();
@@ -471,14 +428,9 @@ function buildValueMap(tableLike) {
     idxMet = headers.findIndex(h => (h.id || h.name) === wanted);
   }
 
-  // Heurística por nombre
-  if (idxDim < 0)
-    idxDim = headers.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
-
-  // Fallback final: primera columna como dimensión
+  if (idxDim < 0) idxDim = headers.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
   if (idxDim < 0 && headers.length) idxDim = 0;
 
-  // Métrica: primera numérica distinta de la dimensión
   if (idxMet < 0 && rows.length) {
     const sampleN = Math.min(rows.length, 25);
     outer:
@@ -497,7 +449,7 @@ function buildValueMap(tableLike) {
   if (idxDim < 0 || idxMet < 0) {
     warn('[Viz] No se encontraron campos válidos para dimensión/métrica', { idxDim, idxMet });
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
-  }
+    }
 
   const map = new Map();
   const values = [];
@@ -522,6 +474,54 @@ function buildValueMap(tableLike) {
 }
 
 /* ============================================================================
+   Render helpers: Row lookup & templating
+============================================================================ */
+function buildRowLookup(message) {
+  const hdrs = message?.tables?.DEFAULT?.headers || [];
+  const rows = message?.tables?.DEFAULT?.rows || [];
+  const names = hdrs.map(h => h.name || h.id || '');
+
+  // localizar la columna dimensión (igual heurística que en buildValueMap)
+  let idxDim = -1;
+  const fbc = message?.fieldsByConfigId || {};
+  const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
+  if (dimIdPref) idxDim = hdrs.findIndex(h => (h.id || h.name) === dimIdPref);
+  if (idxDim < 0 && Array.isArray(message?.fields?.dimensions) && message.fields.dimensions.length) {
+    const wanted = (message.fields.dimensions[0].id || message.fields.dimensions[0].name || '').toString();
+    idxDim = hdrs.findIndex(h => (h.id || h.name) === wanted);
+  }
+  if (idxDim < 0) idxDim = hdrs.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
+  if (idxDim < 0 && hdrs.length) idxDim = 0;
+
+  const map = new Map();
+  for (const row of rows) {
+    const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '').toString();
+    if (!keyRaw) continue;
+    const byName = Object.fromEntries(names.map((nm,i)=>[nm, (row?.[i]?.v ?? row?.[i]?.value ?? row?.[i])]));
+    const keys = (typeof normalizeKeyFuzzy === 'function') ? normalizeKeyFuzzy(keyRaw) : [keyRaw];
+    for (const k of keys) map.set(k, byName);
+  }
+  return {
+    get(nombreRaw) {
+      const keys = (typeof normalizeKeyFuzzy === 'function') ? normalizeKeyFuzzy(nombreRaw) : [String(nombreRaw||'')];
+      for (const k of keys) if (map.has(k)) return map.get(k);
+      return null;
+    }
+  };
+}
+
+function renderTemplate(tpl, nombreLabel, v, rowByName) {
+  const valStr = (v != null && Number.isFinite(v)) ? String(v) : 's/d';
+  return String(tpl || '')
+    .replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel)
+    .replace(/\{\{\s*valor\s*\}\}/gi, valStr)
+    .replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
+      const key = String(colName || '').trim();
+      return (rowByName && key && (rowByName[key] ?? '')) ?? '';
+    });
+}
+
+/* ============================================================================
    Render principal (Leaflet)
 ============================================================================ */
 const __leafletState = { map: null, layer: null, legend: null };
@@ -529,13 +529,7 @@ const __leafletState = { map: null, layer: null, legend: null };
 export default function drawVisualization(container, message = {}) {
   const UWS_RE = /[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g;
   const cleanStringFallback = (s) =>
-    String(s ?? '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(UWS_RE, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
+    String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(UWS_RE, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
   const fuzzy =
     (typeof normalizeKeyFuzzy === 'function')
       ? normalizeKeyFuzzy
@@ -552,7 +546,6 @@ export default function drawVisualization(container, message = {}) {
   const style  = readStyle(message);
   const nivel  = style.nivelJerarquia || 'barrio';
 
-  // Dump legible de los estilos que llegan vs. lo que interpreta readStyle
   if (DEBUG) {
     const s = message?.styleById || message?.style || {};
     const readable = {};
@@ -566,20 +559,15 @@ export default function drawVisualization(container, message = {}) {
     console.groupEnd();
   }
 
-  // Diagnóstico previo
-  if (DEBUG) {
-    console.group('[Viz] MESSAGE snapshot');
-    console.log('keys:', Object.keys(message||{}));
-    console.log('fieldsByConfigId:', message?.fieldsByConfigId);
-    console.log('fields:', message?.fields);
-    console.log('styleById:', message?.styleById);
-    console.log('DEFAULT.headers:', message?.tables?.DEFAULT?.headers);
-    console.log('DEFAULT.rows sample:', (message?.tables?.DEFAULT?.rows||[]).slice(0,2));
-    console.groupEnd();
-  }
-
   const stats  = buildValueMap(message);
+  const rowLookup = buildRowLookup(message);
   const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
+
+  // Detectar categorías auto si métrica ∈ {1,2,3}
+  const uniqVals = new Set();
+  for (const v of (stats?.map?.values?.() || [])) { if (Number.isFinite(v)) uniqVals.add(v); }
+  const autoCategory = uniqVals.size > 0 && [...uniqVals].every(v => Number.isInteger(v) && v >= 1 && v <= 3);
+  const categoryModeActive = !!style.categoryMode || autoCategory;
 
   // Mapa único reutilizable
   if (!__leafletState.map) {
@@ -590,7 +578,7 @@ export default function drawVisualization(container, message = {}) {
       container.appendChild(current);
       setTimeout(() => { try { __leafletState.map.invalidateSize(); } catch {} }, 0);
     }
-    if (__leafletState.layer) { try { __leafletState.map.removeLayer(__leafletState.layer); } catch {} }
+    if (__leafletState.layer)  { try { __leafletState.map.removeLayer(__leafletState.layer); } catch {} }
     if (__leafletState.legend) { try { __leafletState.legend.remove(); } catch {} }
     __leafletState.layer = null;
     __leafletState.legend = null;
@@ -599,15 +587,21 @@ export default function drawVisualization(container, message = {}) {
 
   const styleFn = (feature) => {
     const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
+
+    // métrica por barrio
     let v;
     if (stats?.map?.size) {
-      for (const k of fuzzy(nombreRaw)) {
-        if (stats.map.has(k)) { v = stats.map.get(k); break; }
-      }
+      for (const k of fuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
     }
 
+    // Color
     let fillColor;
-    if (stats?.map?.size && Number.isFinite(v)) {
+    if (Number.isFinite(v) && categoryModeActive) {
+      if (v === style.cat1Value)      fillColor = style.cat1Color;
+      else if (v === style.cat2Value) fillColor = style.cat2Color;
+      else if (v === style.cat3Value) fillColor = style.cat3Color;
+      else                            fillColor = style.categoryOtherColor || style.colorMissing;
+    } else if (stats?.map?.size && Number.isFinite(v)) {
       const t = (v - stats.min) / ((stats.max - stats.min) || 1);
       fillColor = getColorFromScaleOrPalette(t, style);
     } else {
@@ -629,22 +623,28 @@ export default function drawVisualization(container, message = {}) {
       const nombreRaw   = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
       const nombreLabel = String(nombreRaw);
 
-      if (style.showLabels) {
-        lyr.bindTooltip(nombreLabel, { sticky: true, direction: 'center' });
-      }
-
+      // métrica (para {{valor}})
       let v;
       if (stats?.map?.size) {
-        for (const k of fuzzy(nombreRaw)) {
-          if (stats.map.has(k)) { v = stats.map.get(k); break; }
-        }
+        for (const k of fuzzy(nombreRaw)) { if (stats.map.has(k)) { v = stats.map.get(k); break; } }
       }
 
-      const content = (style.popupFormat || '')
-        .replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel)
-        .replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? String(v) : 's/d');
+      // Fila completa para {{col:...}}
+      const rowByName = rowLookup.get(nombreRaw);
 
-      lyr.bindPopup(content, { closeButton: false });
+      // Plantillas: tooltip usa popup si no hay tooltipFormat
+      const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
+      const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
+
+      // Tooltip (hover) — requiere "Mostrar etiquetas" activado en Estilos
+      if (style.showLabels) {
+        const tooltipHtml = renderTemplate(tooltipTpl, nombreLabel, v, rowByName);
+        lyr.bindTooltip(tooltipHtml, { sticky: true, direction: 'auto', opacity: 0.95 });
+      }
+
+      // Popup (click)
+      const popupHtml = renderTemplate(popupTpl, nombreLabel, v, rowByName);
+      lyr.bindPopup(popupHtml, { closeButton: false });
     }
   }).addTo(map);
   __leafletState.layer = layer;
@@ -676,18 +676,49 @@ export default function drawVisualization(container, message = {}) {
         font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
       });
 
+      // Leyenda categórica
+      if (categoryModeActive) {
+        const entries = [
+          { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
+          { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
+          { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
+          { col: style.categoryOtherColor, lbl: 'Otros' }
+        ];
+        for (const e of entries) {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.margin = '2px 0';
+
+          const sw = document.createElement('span');
+          sw.style.display = 'inline-block';
+          sw.style.width = '14px';
+          sw.style.height = '14px';
+          sw.style.border = '1px solid rgba(0,0,0,.2)';
+          sw.style.background = e.col;
+
+          const label = document.createElement('span');
+          label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
+
+          row.appendChild(sw);
+          row.appendChild(label);
+          div.appendChild(row);
+        }
+        return div;
+      }
+
+      // Leyenda continua
       if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || stats.count === 0) {
         div.textContent = 'Sin datos';
         return div;
       }
-
       const breaks = 5;
       for (let i = 0; i < breaks; i++) {
         const a = stats.min + (stats.max - stats.min) * (i / breaks);
         const b = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
         const mid = (a + b) / 2;
         const t = (mid - stats.min) / ((stats.max - stats.min) || 1);
-
         const col = getColorFromScaleOrPalette(t, style);
 
         const row = document.createElement('div');
@@ -732,7 +763,7 @@ function fmt(n) {
 }
 
 /* ============================================================================
-   Wrapper dscc: subscribe con objectTransform + inspector detallado
+   Wrapper dscc
 ============================================================================ */
 (function () {
   'use strict';
@@ -749,7 +780,6 @@ function fmt(n) {
     return el;
   }
 
-  // Inspector: loguea payload crudo + normalizado + tabla legible
   function inspectAndRender(data) {
     try {
       if (DEBUG) {
@@ -791,9 +821,7 @@ function fmt(n) {
         console.groupEnd();
       }
 
-      // Unificar estilos desde styleById o style
       const incomingStyle = data.styleById || data.style || {};
-
       const { headers, rows } = toHeadersRows(norm);
       const tableLike = {
         fields: data.fields || {},
@@ -803,15 +831,8 @@ function fmt(n) {
       };
       if (DEBUG) console.log('style incoming:', incomingStyle);
 
-      // Escaneo rápido de NBSP/zero-width en dimensión elegida (si la detectamos)
-      if (DEBUG && rows.length && headers.length) {
-        const vm = buildValueMap({ tables: { DEFAULT: { headers, rows } }, fieldsByConfigId: data.fieldsByConfigId, fields: data.fields });
-        console.log('[Inspector] valueMap stats → min/max/count:', vm.min, vm.max, vm.count);
-      }
-
       drawVisualization(ensureContainer(), tableLike);
       if (DEBUG) console.groupEnd();
-      // Exponer último snapshot
       if (typeof window !== 'undefined') {
         window.__dsccLast = { raw: data, normalized: norm, headers, rows };
       }
@@ -823,12 +844,7 @@ function fmt(n) {
   async function initWrapper(attempt = 1) {
     try {
       const MAX_ATTEMPTS = 5;
-
-      // Evita doble suscripción si esto se llama más de una vez
-      if (window.__VIZ_SUBSCRIBED) {
-        dbg('[Viz] initWrapper: ya suscripto, salgo.');
-        return;
-      }
+      if (window.__VIZ_SUBSCRIBED) { dbg('[Viz] initWrapper: ya suscripto, salgo.'); return; }
 
       const d = await waitForDscc().catch(() => null);
 
@@ -836,7 +852,6 @@ function fmt(n) {
         dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
         dbg('[Viz] transforms:', { object: !!d.objectTransform, table: !!d.tableTransform });
 
-        // 1) Suscripción principal (objectTransform) → TU FLUJO REAL
         if (d.objectTransform) {
           d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
           window.__VIZ_SUBSCRIBED = true;
@@ -846,7 +861,6 @@ function fmt(n) {
           window.__VIZ_SUBSCRIBED = true;
         }
 
-        // 3) TAP opcional SOLO para logs con tableTransform (una vez, si DEBUG)
         if (DEBUG && d.tableTransform && !window.__TAP_TT_DONE) {
           window.__TAP_TT_DONE = true;
           const once = (fn) => { let done = false; return (x) => { if (!done) { done = true; fn(x); } }; };
@@ -856,7 +870,6 @@ function fmt(n) {
               try {
                 console.log('tables keys:', Object.keys(t?.tables || {}));
                 console.log('DEFAULT sample row:', t?.tables?.DEFAULT?.[0]);
-                // console.log('DEFAULT first 3:', t?.tables?.DEFAULT?.slice(0,3));
               } finally {
                 console.groupEnd();
               }
@@ -865,10 +878,9 @@ function fmt(n) {
           );
         }
 
-        return; // importante: ya quedaste suscripto
+        return;
       }
 
-      // dscc aún no está → inyectar script y reintentar
       ensureDsccScript();
       if (attempt < MAX_ATTEMPTS) {
         warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
@@ -876,7 +888,7 @@ function fmt(n) {
         return;
       }
 
-      // Fallback (mock) si dscc nunca llega
+      // Fallback (mock)
       err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
       const container = ensureContainer();
       const mockData = {
