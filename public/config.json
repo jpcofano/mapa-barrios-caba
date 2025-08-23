@@ -42,7 +42,7 @@
     },
     {
       "id": "coloring",
-      "label": "Colores",
+      "label": "Colores (continuo)",
       "elements": [
         {
           "id": "colorScale",
@@ -68,17 +68,17 @@
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Ninguna (usar escala base)", "value": "" },
-            { "label": "viridis",   "value": "viridis" },
-            { "label": "magma",     "value": "magma" },
-            { "label": "plasma",    "value": "plasma" },
-            { "label": "cividis",   "value": "cividis" },
-            { "label": "turbo",     "value": "turbo" },
-            { "label": "Spectral",  "value": "Spectral" },
-            { "label": "Rojos",     "value": "reds" },
-            { "label": "Verdes",    "value": "greens" },
-            { "label": "Azules",    "value": "blues" },
-            { "label": "Violetas",  "value": "purples" },
-            { "label": "Naranjas",  "value": "oranges" },
+            { "label": "viridis",     "value": "viridis" },
+            { "label": "magma",       "value": "magma" },
+            { "label": "plasma",      "value": "plasma" },
+            { "label": "cividis",     "value": "cividis" },
+            { "label": "turbo",       "value": "turbo" },
+            { "label": "Spectral",    "value": "Spectral" },
+            { "label": "Rojos",       "value": "reds" },
+            { "label": "Verdes",      "value": "greens" },
+            { "label": "Azules",      "value": "blues" },
+            { "label": "Violetas",    "value": "purples" },
+            { "label": "Naranjas",    "value": "oranges" },
             { "label": "soloAmarillo (máximo amarillo)", "value": "soloAmarillo" },
             { "label": "coolToYellow (frío→amarillo)",   "value": "coolToYellow" }
           ],
@@ -100,9 +100,33 @@
           "id": "colorMissing",
           "label": "Color para valores faltantes",
           "type": "FILL_COLOR",
-         // "defaultValue": "#cccccc"
-         "defaultValue": "#D9D9D9"
+          "defaultValue": "#D9D9D9"
         }
+      ]
+    },
+    {
+      "id": "categories",
+      "label": "Colores por categorías (1/2/3)",
+      "elements": [
+        {
+          "id": "categoryMode",
+          "label": "Activar modo categórico (si la métrica no es 1/2/3 automáticamente)",
+          "type": "CHECKBOX",
+          "defaultValue": false
+        },
+        { "id": "category1Label", "label": "Etiqueta Cat. 1", "type": "TEXTINPUT", "defaultValue": "Categoría 1" },
+        { "id": "category1Value", "label": "Valor Cat. 1",    "type": "NUMBER",    "defaultValue": 1 },
+        { "id": "category1Color", "label": "Color Cat. 1",    "type": "FILL_COLOR","defaultValue": "#F4B400" },
+
+        { "id": "category2Label", "label": "Etiqueta Cat. 2", "type": "TEXTINPUT", "defaultValue": "Categoría 2" },
+        { "id": "category2Value", "label": "Valor Cat. 2",    "type": "NUMBER",    "defaultValue": 2 },
+        { "id": "category2Color", "label": "Color Cat. 2",    "type": "FILL_COLOR","defaultValue": "#3F51B5" },
+
+        { "id": "category3Label", "label": "Etiqueta Cat. 3", "type": "TEXTINPUT", "defaultValue": "Categoría 3" },
+        { "id": "category3Value", "label": "Valor Cat. 3",    "type": "NUMBER",    "defaultValue": 3 },
+        { "id": "category3Color", "label": "Color Cat. 3",    "type": "FILL_COLOR","defaultValue": "#00ACC1" },
+
+        { "id": "categoryOtherColor", "label": "Color \"Otros\"", "type": "FILL_COLOR", "defaultValue": "#E0E0E0" }
       ]
     },
     {
@@ -119,8 +143,7 @@
           "id": "borderColor",
           "label": "Color del borde",
           "type": "FILL_COLOR",
-          "defaultValue": "#000000"
-        // "defaultValue": "#9E9E9E"
+          "defaultValue": "#9E9E9E"
         },
         {
           "id": "borderWidth",
@@ -151,9 +174,9 @@
           "label": "Posición de la leyenda",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Abajo derecha",  "value": "bottomright" },
-            { "label": "Abajo izquierda","value": "bottomleft" },
-            { "label": "Arriba derecha", "value": "topright" },
+            { "label": "Abajo derecha",   "value": "bottomright" },
+            { "label": "Abajo izquierda", "value": "bottomleft" },
+            { "label": "Arriba derecha",  "value": "topright" },
             { "label": "Arriba izquierda","value": "topleft" }
           ],
           "defaultValue": "bottomright"
@@ -168,14 +191,41 @@
     },
     {
       "id": "popup",
-      "label": "Popup",
+      "label": "Popup / Tooltip",
       "elements": [
         {
           "id": "popupFormat",
-          "label": "Formato del popup",
+          "label": "Formato del popup (click)",
           "type": "TEXTINPUT",
           "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
+        },
+        {
+          "id": "tooltipFormat",
+          "label": "Formato del tooltip (hover) — si se deja vacío, usa el popup",
+          "type": "TEXTINPUT",
+          "defaultValue": ""
         }
+      ]
+    },
+    {
+      "id": "branding",
+      "label": "Branding",
+      "elements": [
+        { "id": "logoUrl",      "label": "URL del logo (https o gs://)", "type": "TEXTINPUT", "defaultValue": "" },
+        {
+          "id": "logoPosition",
+          "label": "Posición del logo",
+          "type": "SELECT_SINGLE",
+          "options": [
+            { "label": "Abajo izquierda", "value": "bottomleft" },
+            { "label": "Abajo derecha",   "value": "bottomright" },
+            { "label": "Arriba izquierda","value": "topleft" },
+            { "label": "Arriba derecha",  "value": "topright" }
+          ],
+          "defaultValue": "bottomleft"
+        },
+        { "id": "logoWidthPx",  "label": "Ancho del logo (px)", "type": "NUMBER",  "defaultValue": 56 },
+        { "id": "logoOpacity",  "label": "Opacidad del logo",   "type": "OPACITY", "defaultValue": 0.9 }
       ]
     }
   ]

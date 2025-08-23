@@ -714,6 +714,7 @@ export default function drawVisualization(container, message = {}) {
         return div;
       }
       const breaks = 5;
+      const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
       for (let i = 0; i < breaks; i++) {
         const a = stats.min + (stats.max - stats.min) * (i / breaks);
         const b = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
@@ -735,7 +736,8 @@ export default function drawVisualization(container, message = {}) {
         sw.style.background = col;
 
         const label = document.createElement('span');
-        label.textContent = `${fmt(a)} – ${fmt(b)}`;
+       // label.textContent = `${fmt(a)} – ${fmt(b)}`;
+        label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
 
         row.appendChild(sw);
         row.appendChild(label);
