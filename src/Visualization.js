@@ -1,6 +1,6 @@
 // Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG
-// Agregado por barrio + plantillas avanzadas (sum/avg/min/max/count/tasa/rank/percentil)
-// Paletas + categórico + tooltip=popup + logo (gs://) + borde auto-contraste opcional
+// Rank descendente (1 = máximo) + agregación fija por dimensión elegida + lookup por nombre e id (col1/col2…)
+// Tooltip/popup avanzados + paletas + logo compatible con gs:// → https + data: fallback opcional
 
 import * as dsccImported from '@google/dscc';
 import L from 'leaflet';
@@ -56,7 +56,6 @@ function waitForDscc(maxMs = 4000, interval = 40) {
     })();
   });
 }
-
 const ensureDsccScript = (() => {
   let injected = false;
   return () => {
@@ -114,18 +113,14 @@ function cleanString(s) {
     .replace(/\s+/g, ' ').trim().toLowerCase();
 }
 const normalizeKey = (s) => cleanString(s);
-const normalizeKeyFuzzy = (s) => {
-  const raw = cleanString(s);
-  const compact = raw.replace(/\s+/g,'');
-  const alnum   = raw.replace(/[^\p{L}\p{N}]+/gu,'');
-  return Array.from(new Set([raw, compact, alnum]));
-};
-
 const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
 const lerp = (a,b,t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
 const rgb = (r,g,b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 
+/* ============================================================================
+   Colores / paletas
+============================================================================ */
 function colorFromScale(scaleName, t, invert) {
   t = clamp01(t); if (invert) t = 1 - t;
   switch (scaleName) {
@@ -136,16 +131,13 @@ function colorFromScale(scaleName, t, invert) {
     default:            { const r=lerp(0,204,t),  g=lerp(170,0,t);   return rgb(r,g,0); }
   }
 }
-
 const PRESET_PALETTES = {
   viridis: ['#440154','#482777','#3e4989','#31688e','#26828e','#1f9e89','#35b779','#6ece58','#b5de2b','#fde725'],
   blues:   ['#f7fbff','#deebf7','#c6dbef','#9ecae1','#6baed6','#4292c6','#2171b5','#08519c'],
   greens:  ['#f7fcf5','#e5f5e0','#c7e9c0','#a1d99b','#74c476','#41ab5d','#238b45','#005a32'],
   reds:    ['#fff5f0','#fee0d2','#fcbba1','#fc9272','#fb6a4a','#ef3b2c','#cb181d','#99000d'],
   purples: ['#fcfbfd','#efedf5','#dadaeb','#bcbddc','#9e9ac8','#807dba','#6a51a3','#54278f'],
-  oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04']
-};
-Object.assign(PRESET_PALETTES, {
+  oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04'],
   magma:   ['#000004','#1b0c41','#4f0a6d','#7c1d6f','#a52c60','#cf4446','#ed6925','#fb9b06','#f7d13d','#fcfdbf'],
   plasma:  ['#0d0887','#5b02a3','#9a179b','#cb4679','#ed7953','#fb9f3a','#fdca26','#f0f921'],
   cividis: ['#00224e','#233b67','#3f5a78','#5a7b89','#7a9c98','#9fbc9f','#c9dca0','#f2f4b3'],
@@ -153,7 +145,7 @@ Object.assign(PRESET_PALETTES, {
   Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2'],
   soloAmarillo: ['#FFFFF2','#FFFFE6','#FFFFCC','#FFFFB3','#FFFF99','#FFFF66','#FFFF33','#FFFF00'],
   coolToYellow: ['#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00']
-});
+};
 function hexToRgb(h){ const x=h.replace('#',''); return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)]; }
 function rgbToHex([r,g,b]){ const h=n=>Math.round(n).toString(16).padStart(2,'0'); return `#${h(r)}${h(g)}${h(b)}`; }
 function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
@@ -367,56 +359,90 @@ function toHeadersRows(norm) {
 }
 
 /* ============================================================================
-   Agregado por barrio: valor para colorear
+   Resolver de índices (dimensión/métrica) — FIJA la dimensión elegida
 ============================================================================ */
-function buildValueMap(tableLike) {
-  const tableRaw = tableLike?.tables?.DEFAULT || {};
-  const headers = tableRaw.headers || [];
-  const rows    = tableRaw.rows || [];
-
+function resolveIndices(tableLike, style) {
+  const headers = tableLike?.tables?.DEFAULT?.headers || [];
+  const names   = headers.map(h => (h.name || h.id || '').toString());
+  const ids     = headers.map(h => (h.id || '').toString());
+  const fbc     = tableLike?.fieldsByConfigId || {};
+  const fields  = tableLike?.fields || {};
   let idxDim = -1, idxMet = -1;
 
-  const fbc = tableLike?.fieldsByConfigId || {};
-  const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
-  const metIdPref = fbc.metricPrimary?.[0]?.id || fbc.metricPrimary?.[0]?.name;
-  if (dimIdPref) idxDim = headers.findIndex(h => (h.id || h.name) === dimIdPref);
-  if (metIdPref) idxMet = headers.findIndex(h => (h.id || h.name) === metIdPref);
+  // 1) Dimensión desde config (fieldsByConfigId.geoDimension)
+  const fbd = fbc?.geoDimension?.[0];
+  if (fbd) {
+    const byName = names.findIndex(n => n === String(fbd.name || ''));
+    const byId   = ids.findIndex(i => i === String(fbd.id   || ''));
+    idxDim = (byName >= 0 ? byName : byId);
+  }
 
-  const fields = tableLike?.fields || {};
-  if (idxDim < 0 && Array.isArray(fields.dimensions) && fields.dimensions.length) {
-    const wanted = (fields.dimensions[0].id || fields.dimensions[0].name || '').toString();
-    idxDim = headers.findIndex(h => (h.id || h.name) === wanted);
+  // 2) Si no apareció, preferencia explícita según nivel en estilos
+  if (idxDim < 0) {
+    const preferred = (style?.nivelJerarquia === 'comuna')
+      ? ['comuna','cod_comuna','codigo comuna','id comuna']
+      : ['barrio','nombre','nombre_barrio','barrio nombre'];
+    const want = new Set(preferred.map(x => cleanString(x)));
+    idxDim = names.findIndex(n => want.has(cleanString(n)));
   }
-  if (idxMet < 0 && Array.isArray(fields.metrics) && fields.metrics.length) {
-    const wanted = (fields.metrics[0].id || fields.metrics[0].name || '').toString();
-    idxMet = headers.findIndex(h => (h.id || h.name) === wanted);
-  }
-  if (idxDim < 0) idxDim = headers.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
+
+  // 3) Fallback: heurística
+  if (idxDim < 0) idxDim = names.findIndex(n => /barrio|comuna|nombre|name|texto/i.test(n));
   if (idxDim < 0 && headers.length) idxDim = 0;
 
-  // heurística si no hay métrica marcada
-  if (idxMet < 0 && rows.length) {
-    const sampleN = Math.min(rows.length, 25);
-    outer:
-    for (let j = 0; j < headers.length; j++) {
-      if (j === idxDim) continue;
-      let hits = 0, seen = 0;
-      for (let r = 0; r < sampleN; r++) {
-        const n = toNumberLoose(rows[r][j]);
-        if (Number.isFinite(n)) hits++;
-        seen++;
-      }
-      if (seen && hits / seen >= 0.6) { idxMet = j; break outer; }
+  // MÉTRICA: del config si existe
+  const fbm = fbc?.metricPrimary?.[0];
+  if (fbm) {
+    const byName = names.findIndex(n => n === String(fbm.name || ''));
+    const byId   = ids.findIndex(i => i === String(fbm.id   || ''));
+    idxMet = (byName >= 0 ? byName : byId);
+  }
+
+  // Si no, intentamos por fields.metrics
+  if (idxMet < 0 && Array.isArray(fields.metrics)) {
+    for (const f of fields.metrics) {
+      const nm = String(f.name || f.id || '');
+      let j = names.findIndex(n => n === nm);
+      if (j < 0) j = ids.findIndex(i => i === nm);
+      if (j >= 0) { idxMet = j; break; }
     }
   }
 
+  // Último recurso: heurística numérica
+  if (idxMet < 0) {
+    const rows = tableLike?.tables?.DEFAULT?.rows || [];
+    const sampleN = Math.min(rows.length, 25);
+    outer: for (let j=0; j<headers.length; j++) {
+      if (j === idxDim) continue;
+      let hits=0, seen=0;
+      for (let r=0; r<sampleN; r++) {
+        const n = toNumberLoose(rows[r]?.[j]);
+        if (Number.isFinite(n)) hits++;
+        seen++;
+      }
+      if (seen && hits/seen >= 0.6) { idxMet = j; break outer; }
+    }
+  }
+
+  return { idxDim, idxMet };
+}
+
+/* ============================================================================
+   Agregado por barrio/comuna: valor para colorear
+============================================================================ */
+function buildValueMap(tableLike, style) {
+  const tableRaw = tableLike?.tables?.DEFAULT || {};
+  const headers  = tableRaw.headers || [];
+  const rows     = tableRaw.rows || [];
+
+  const { idxDim, idxMet } = resolveIndices(tableLike, style);
   if (idxDim < 0 || idxMet < 0) {
     warn('[Viz] No se encontraron campos válidos para dimensión/métrica', { idxDim, idxMet });
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
   }
 
   const canon = (s) => normalizeKey(String(s ?? ''));
-  const map = new Map(); // barrio → SUM(métrica)
+  const map = new Map(); // barrio/comuna → SUM(métrica)
   for (const row of rows) {
     const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '');
     if (!keyRaw) continue;
@@ -430,12 +456,12 @@ function buildValueMap(tableLike) {
   const min = values.length ? Math.min(...values) : NaN;
   const max = values.length ? Math.max(...values) : NaN;
 
-  dbg('[Viz] agregación por barrio:', map.size, 'min/max:', min, max);
+  dbg('[Viz] agregación por dimensión fija:', map.size, 'min/max:', min, max);
   return { map, min, max, count: values.length };
 }
 
 /* ============================================================================
-   Row lookup agregado por barrio + estadísticas por columna
+   Row lookup agregado por barrio/comuna + estadísticas (por nombre **e id**)
 ============================================================================ */
 function normColKey(s){
   return String(s ?? '')
@@ -443,25 +469,17 @@ function normColKey(s){
     .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ')
     .replace(/\s+/g,' ').trim().toLowerCase();
 }
-function buildRowLookup(message) {
+function buildRowLookup(message, style) {
   const hdrs = message?.tables?.DEFAULT?.headers || [];
   const rows = message?.tables?.DEFAULT?.rows || [];
   const names = hdrs.map(h => h.name || h.id || '');
+  const ids   = hdrs.map(h => h.id || '');
 
-  // localizar dimensión
-  let idxDim = -1;
-  const fbc = message?.fieldsByConfigId || {};
-  const dimIdPref = fbc.geoDimension?.[0]?.id || fbc.geoDimension?.[0]?.name;
-  if (dimIdPref) idxDim = hdrs.findIndex(h => (h.id || h.name) === dimIdPref);
-  if (idxDim < 0 && Array.isArray(message?.fields?.dimensions) && message.fields.dimensions.length) {
-    const wanted = (message.fields.dimensions[0].id || message.fields.dimensions[0].name || '').toString();
-    idxDim = hdrs.findIndex(h => (h.id || h.name) === wanted);
-  }
-  if (idxDim < 0) idxDim = hdrs.findIndex(h => /barrio|comuna|nombre|name|texto/i.test(h?.name || h?.id || ''));
-  if (idxDim < 0 && hdrs.length) idxDim = 0;
+  const tl = { tables:{ DEFAULT:{ headers: hdrs, rows } }, fields: message?.fields, fieldsByConfigId: message?.fieldsByConfigId };
+  const { idxDim } = resolveIndices(tl, style);
 
   const canon = (s) => normalizeKey(String(s ?? ''));
-  const aggByKey = new Map(); // key → { __stats, __rowCount, columnas… }
+  const aggByKey = new Map(); // clave → { __rowCount, __statsByName, __statsById, __byId, …(por nombre)}
 
   for (const row of rows) {
     const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '');
@@ -469,23 +487,37 @@ function buildRowLookup(message) {
     const key = canon(keyRaw);
 
     let b = aggByKey.get(key);
-    if (!b) { b = { __stats: Object.create(null), __rowCount: 0 }; aggByKey.set(key, b); }
+    if (!b) { b = { __rowCount: 0, __stats: Object.create(null), __statsById: Object.create(null), __byId: Object.create(null) }; aggByKey.set(key, b); }
     b.__rowCount++;
 
     for (let i = 0; i < names.length; i++) {
       if (i === idxDim) continue;
       const nm  = names[i];
+      const id  = ids[i];
       const val = (row?.[i]?.v ?? row?.[i]?.value ?? row?.[i]);
       const n   = toNumberLoose(val);
 
       if (Number.isFinite(n)) {
-        b[nm] = (b[nm] ?? 0) + n; // SUM por compatibilidad {{col:...}}
+        // SUM por nombre e id
+        b[nm] = (b[nm] ?? 0) + n;
+        if (id) b.__byId[id] = (b.__byId[id] ?? 0) + n;
+
+        // Stats por nombre
         const k = normColKey(nm);
         let st = b.__stats[k];
         if (!st) st = b.__stats[k] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
         st.sum += n; st.count += 1; if (n < st.min) st.min = n; if (n > st.max) st.max = n;
-      } else if (!(nm in b) && val != null) {
-        b[nm] = val; // primer texto no-nulo
+
+        // Stats por id
+        if (id) {
+          let st2 = b.__statsById[id];
+          if (!st2) st2 = b.__statsById[id] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
+          st2.sum += n; st2.count += 1; if (n < st2.min) st2.min = n; if (n > st2.max) st2.max = n;
+        }
+      } else {
+        // Primero texto no nulo por nombre e id
+        if (!(nm in b) && val != null) b[nm] = val;
+        if (id && !(id in b.__byId) && val != null) b.__byId[id] = val;
       }
     }
   }
@@ -499,15 +531,21 @@ function buildRowLookup(message) {
 }
 function getCol(rowAgg, key){
   if (!rowAgg) return undefined;
-  if (key in rowAgg) return rowAgg[key]; // exacto
-  const want = normColKey(key);
-  for (const k of Object.keys(rowAgg)) if (normColKey(k) === want) return rowAgg[k];
+  const k = String(key || '');
+  if (k in rowAgg) return rowAgg[k];                 // nombre exacto
+  if (rowAgg.__byId && k in rowAgg.__byId) return rowAgg.__byId[k]; // id exacto (col2…)
+  const want = normColKey(k);
+  for (const nm of Object.keys(rowAgg)) {           // nombre normalizado
+    if (normColKey(nm) === want) return rowAgg[nm];
+  }
   return undefined;
 }
 function getStat(rowAgg, key, which) {
   if (!rowAgg) return NaN;
   if (which === 'count' && (key == null || key === '')) return Number(rowAgg.__rowCount || 0);
-  const st = rowAgg.__stats?.[normColKey(key)];
+  const k = String(key || '');
+  let st = rowAgg.__stats?.[normColKey(k)];
+  if (!st && rowAgg.__statsById && (k in rowAgg.__statsById)) st = rowAgg.__statsById[k];
   if (!st) return NaN;
   switch (which) {
     case 'sum':   return st.sum;
@@ -520,18 +558,26 @@ function getStat(rowAgg, key, which) {
 }
 
 /* ============================================================================
-   Rank / percentil
+   Rank / percentil  (1 = máximo)
 ============================================================================ */
-function makeRankCtx(mapValues) {
-  const v = Array.from(mapValues || []).filter(Number.isFinite).sort((a,b)=>a-b);
+function makeRankCtx(mapValues, opts = { highIsOne: true }) {
+  const v = Array.from(mapValues || []).filter(Number.isFinite).sort((a,b)=>a-b); // asc
   const idx = new Map();
   for (let i=0;i<v.length;i++) if (!idx.has(v[i])) idx.set(v[i], i);
   const N = v.length;
-  return {
-    rankOf(x){ if (!Number.isFinite(x) || !N) return NaN; return (idx.get(x) ?? v.indexOf(x)) + 1; },
-    percentileOf(x){ if (!Number.isFinite(x) || !N) return NaN; const i=(idx.get(x) ?? v.indexOf(x)); return Math.round(100 * (i / (N - 1 || 1))); },
-    N
+
+  const rankOf = (x) => {
+    if (!Number.isFinite(x) || !N) return NaN;
+    const i = (idx.get(x) ?? v.indexOf(x));
+    return opts.highIsOne ? (N - i) : (i + 1);
   };
+  const percentileOf = (x) => {
+    if (!Number.isFinite(x) || !N) return NaN;
+    const i = (idx.get(x) ?? v.indexOf(x));
+    return Math.round(100 * (i / (N - 1 || 1))); // 0=min, 100=max
+  };
+
+  return { rankOf, percentileOf, N };
 }
 
 /* ============================================================================
@@ -550,7 +596,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
       const p = rankCtx?.percentileOf?.(v);
       return Number.isFinite(p) ? `${p}º` : 's/d';
     })
-    // {{col:NombreExacto}}
+    // {{col:Nombre o id}}
     .replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
       const raw = getCol(rowByName, String(colName || '').trim());
       const n = Number(raw);
@@ -562,19 +608,19 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     (_m, numCol, denCol, factorStr) => {
       const num = Number(getCol(rowByName, String(numCol).trim()));
       const den = Number(getCol(rowByName, String(denCol).trim()));
-      const factor = Number(factorStr ?? 1000);
+      const factor = Number(factorStr ?? 100);
       const tasa = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
-        ? (num / den) * (Number.isFinite(factor) ? factor : 1000)
+        ? (num / den) * (Number.isFinite(factor) ? factor : 100)
         : NaN;
       return Number.isFinite(tasa) ? fmt0(tasa) : 's/d';
     });
 
-  // {{sum/avg/min/max:Col}}
+  // {{sum/avg/min/max:Col|id}}
   out = out.replace(/\{\{\s*(sum|avg|min|max)\s*:\s*([^}]+?)\s*\}\}/gi,
     (_m, op, col) => fmt0(getStat(rowByName, String(col).trim(), op.toLowerCase()))
   );
 
-  // {{count}}  ó  {{count:Col}}
+  // {{count}}  ó  {{count:Col|id}}
   out = out.replace(/\{\{\s*count(?:\s*:\s*([^}]+))?\s*\}\}/gi,
     (_m, colOpt) => {
       const v = (colOpt && colOpt.trim())
@@ -588,7 +634,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
 }
 
 /* ============================================================================
-   Borde auto-contraste + Logo
+   Borde auto-contraste + Logo (gs:// → https)
 ============================================================================ */
 function hexLuma(hex){
   const [r,g,b] = hexToRgb(hex).map(x=>x/255);
@@ -611,13 +657,52 @@ function normalizeGcsUrl(u) {
   }
   return u;
 }
+function hostAllowedForImg(u) {
+  try {
+    const { hostname } = new URL(u);
+    return /^datastudio\.google\.com$/.test(hostname)
+      || /^lookerstudio\.google\.com$/.test(hostname)
+      || /^drive\.google\.com$/.test(hostname)
+      || /^lh[3-6]\.googleusercontent\.com$/.test(hostname)
+      || /^lh[3-6]\.google\.com$/.test(hostname)
+      || u.startsWith('data:');
+  } catch { return false; }
+}
+function toDriveThumbnail(url, widthPx = 256) {
+  try {
+    const u = new URL(url);
+    // /file/d/FILE_ID/view ...
+    const m1 = u.pathname.match(/\/file\/d\/([^/]+)\//);
+    if (m1) return `https://drive.google.com/thumbnail?id=${m1[1]}&sz=w${Math.max(64, widthPx*2)}`;
+    // uc?export=view&id=FILE_ID
+    const id = u.searchParams.get('id');
+    if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w${Math.max(64, widthPx*2)}`;
+  } catch {}
+  return url;
+}
+async function toDataUrlSafe(url) {
+  const res = await fetch(url, { mode: 'cors' });
+  const blob = await res.blob();
+  return await new Promise((ok, ko) => {
+    const fr = new FileReader();
+    fr.onload = () => ok(fr.result);
+    fr.onerror = ko;
+    fr.readAsDataURL(blob);
+  });
+}
+
 function renderLogo(mapContainerEl, style, state) {
   if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
-  const srcRaw = (style && style.logoUrl) ? String(style.logoUrl).trim() : '';
-  if (!srcRaw) return;
-  const src = normalizeGcsUrl(srcRaw);
+
+  const raw = (style && style.logoUrl) ? String(style.logoUrl).trim() : '';
+  if (!raw) return;
+
+  // Normalizaciones
+  let src = normalizeGcsUrl(raw);                               // gs:// → https://storage.googleapis.com/…
+  src = toDriveThumbnail(src, style.logoWidthPx || 56);         // Drive → thumbnail permitido por CSP
+
   const img = document.createElement('img');
-  img.src = src; img.alt = 'Logo'; img.draggable = false;
+  img.alt = 'Logo'; img.draggable = false;
   Object.assign(img.style, {
     position: 'absolute',
     width: ((style.logoWidthPx || 56) | 0) + 'px',
@@ -632,11 +717,40 @@ function renderLogo(mapContainerEl, style, state) {
   img.style.bottom = (pos.startsWith('bottom') ? pad : '');
   img.style.left = (pos.endsWith('left') ? pad : '');
   img.style.right = (pos.endsWith('right') ? pad : '');
-  const el = mapContainerEl;
-  if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-  el.appendChild(img);
-  state.logoEl = img;
+
+  // Montaje
+  const mount = () => {
+    const el = mapContainerEl;
+    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+    el.appendChild(img);
+    state.logoEl = img;
+  };
+
+  // Fallback si el host no está permitido por CSP → intenta inline data:
+  (async () => {
+    try {
+      const tryInline = async () => {
+        try {
+          const dataUrl = await toDataUrlSafe(src);
+          img.src = dataUrl; mount();
+        } catch (e) {
+          console.warn('[Logo] No se pudo convertir a data URL:', e);
+        }
+      };
+
+      // Si ya es data: o host permitido → directo
+      if (src.startsWith('data:') || hostAllowedForImg(src)) {
+        img.src = src; mount(); return;
+      }
+
+      // No permitido (p.ej. storage.googleapis.com): intento convertir a data:
+      await tryInline();
+    } catch (e) {
+      console.warn('[Logo] Error general al cargar logo:', e);
+    }
+  })();
 }
+
 
 /* ============================================================================
    Render principal
@@ -660,10 +774,10 @@ export default function drawVisualization(container, message = {}) {
     console.group('[Style dump]'); console.table(readable); console.log('readStyle():', style); console.groupEnd();
   }
 
-  const stats  = buildValueMap(message);
-  const rowLookup = buildRowLookup(message);
-  const rankCtx = makeRankCtx(stats?.map?.values?.());
-  const geojson = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
+  const stats     = buildValueMap(message, style);
+  const rowLookup = buildRowLookup(message, style);
+  const rankCtx   = makeRankCtx(stats?.map?.values?.(), { highIsOne: true });
+  const geojson   = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
 
   // categórico auto si valores ∈ {1,2,3}
   const uniqVals = new Set();
@@ -730,7 +844,7 @@ export default function drawVisualization(container, message = {}) {
       const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
       const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
 
-      // Tooltip (hover) — para evitar duplicados unbind antes
+      // Tooltip (hover) — evitar duplicados
       if (style.showLabels) {
         const tooltipHtml = renderTemplate(tooltipTpl, nombreLabel, v, rowByName, rankCtx);
         try { lyr.unbindTooltip(); } catch {}
@@ -868,12 +982,6 @@ function fmt(n) {
       }
 
       const norm = normalizeDEFAULTTable(data);
-      if (DEBUG) {
-        console.log('ids:', norm.ids);
-        console.log('names:', norm.names);
-        console.log('rows count:', norm.rows.length);
-      }
-
       const { headers, rows } = toHeadersRows(norm);
       const incomingStyle = data.styleById || data.style || {};
       const tableLike = {
@@ -882,10 +990,9 @@ function fmt(n) {
         fieldsByConfigId: data.fieldsByConfigId || {},
         styleById: incomingStyle || {}
       };
-      if (DEBUG) console.log('style incoming:', incomingStyle);
 
       drawVisualization(ensureContainer(), tableLike);
-      if (DEBUG) console.groupEnd();
+      if (DEBUG) { console.groupEnd(); }
       if (typeof window !== 'undefined') {
         window.__dsccLast = { raw: data, normalized: norm, headers, rows };
       }
