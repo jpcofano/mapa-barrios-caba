@@ -362,88 +362,111 @@ function toHeadersRows(norm) {
    Resolver de índices (dimensión/métrica) — FIJA la dimensión elegida
 ============================================================================ */
 function resolveIndices(tableLike, style) {
-  const headers = tableLike?.tables?.DEFAULT?.headers || [];
-  const names   = headers.map(h => (h.name || h.id || '').toString());
-  const ids     = headers.map(h => (h.id || '').toString());
-  const namesN  = names.map(cleanString);
+  const H = tableLike?.tables?.DEFAULT?.headers || [];
+  const names = H.map(h => (h.name ?? h.id ?? '').toString());
+  const ids   = H.map(h => (h.id   ?? '').toString());
+  const namesN = names.map(cleanString);
 
-  const fbc     = tableLike?.fieldsByConfigId || {};
-  const fields  = tableLike?.fields || {};
+  // quita “sum/suma/total/avg/prom…” y signos; queda el nombre “puro”
+  const stripAgg = (s) => cleanString(s)
+    .replace(/\b(sum|suma|total|conteo|count|avg|prom|promedio|min|max|media|acum|acumulado)\b/g, '')
+    .replace(/[(){}[\]°%:|]/g, '')
+    .replace(/\s+/g,' ')
+    .trim();
 
-  let idxDim = -1, idxMet = -1;
+  const namesAggless = names.map(stripAgg);
 
-  // --- DIMENSIÓN: primero lo que definís en el panel (geoDimension)
-  const gd = fbc?.geoDimension?.[0];
-  if (gd) {
-    const nid   = String(gd.id   || '');
-    const nname = cleanString(gd.name || '');
-    idxDim = ids.indexOf(nid);
-    if (idxDim < 0 && nname) idxDim = namesN.indexOf(nname);
-  }
-  // fallback explícito por nivel en estilos
+  const byId      = new Map(ids.map((id,i)=>[id,i]));
+  const byName    = new Map(names.map((nm,i)=>[nm,i]));
+  const byNameN   = new Map(namesN.map((nm,i)=>[nm,i]));
+  const byAggless = new Map(namesAggless.map((nm,i)=>[nm,i]));
+
+  const findBySpec = (spec) => {
+    if (!spec) return -1;
+    const sid   = String(spec.id   ?? '');
+    const sname = String(spec.name ?? '');
+    const sN = cleanString(sname);
+    const sA = stripAgg(sname);
+
+    let j = -1;
+    if (sid) j = byId.get(sid) ?? -1;
+    if (j < 0 && sname) j = byName.get(sname) ?? -1;
+    if (j < 0 && sN)    j = byNameN.get(sN) ?? -1;
+    if (j < 0 && sA)    j = byAggless.get(sA) ?? -1;
+    if (j < 0 && sA) {
+      // contains-match de último recurso
+      j = namesAggless.findIndex(n => n === sA || n.endsWith(' ' + sA) || n.startsWith(sA + ' '));
+    }
+    return j;
+  };
+
+  const fbc    = tableLike?.fieldsByConfigId || {};
+  const fields = tableLike?.fields || {};
+
+  // ------------------- DIMENSIÓN (fijar Barrio/Comuna) -------------------
+  let idxDim = findBySpec(fbc?.geoDimension?.[0]);
+
   if (idxDim < 0) {
-    const prefs = (style?.nivelJerarquia === 'comuna')
+    const preferred = (style?.nivelJerarquia === 'comuna')
       ? ['comuna','cod_comuna','codigo comuna','id comuna']
       : ['barrio','nombre','nombre_barrio','barrio nombre'];
-    const want = new Set(prefs.map(cleanString));
+    const want = new Set(preferred.map(cleanString));
     idxDim = namesN.findIndex(n => want.has(n));
   }
-  // último recurso
   if (idxDim < 0) idxDim = namesN.findIndex(n => /barrio|comuna|nombre|name|texto/.test(n));
-  if (idxDim < 0 && headers.length) idxDim = 0;
+  if (idxDim < 0 && H.length) idxDim = 0;
 
-  // --- MÉTRICA PRIMARIA: siempre la del panel (metricPrimary)
-  const mp = fbc?.metricPrimary?.[0];
-  if (mp) {
-    const mid   = String(mp.id   || '');
-    const mname = cleanString(mp.name || '');
-    idxMet = ids.indexOf(mid);
-    if (idxMet < 0 && mname) idxMet = namesN.indexOf(mname);
-  }
+  // ------------------- MÉTRICA PRIMARIA (SIEMPRE la del panel) -------------------
+  let idxMet = findBySpec(fbc?.metricPrimary?.[0]);
 
-  // Si por alguna razón no apareció, probá con fields.metrics (en orden)
+  // Si aún no apareció, intentá localizarla vía fields.metrics (por id/nombre normalizado)
   if (idxMet < 0 && Array.isArray(fields?.metrics) && fields.metrics.length) {
+    const mp = fbc?.metricPrimary?.[0] || {};
+    const targetId = String(mp.id   ?? '');
+    const targetNm = String(mp.name ?? '');
+    const targetN  = cleanString(targetNm);
+    const targetA  = stripAgg(targetNm);
+
     for (const f of fields.metrics) {
-      const mid   = String(f.id   || '');
-      const mname = cleanString(f.name || '');
-      let j = ids.indexOf(mid);
-      if (j < 0 && mname) j = namesN.indexOf(mname);
+      const id = String(f.id ?? '');
+      const nm = String(f.name ?? '');
+      if (id && id === targetId) {
+        const j = byId.get(id);
+        if (j >= 0) { idxMet = j; break; }
+      }
+      const nN = cleanString(nm);
+      const nA = stripAgg(nm);
+      let j = byName.get(nm) ?? byNameN.get(nN) ?? byAggless.get(nA);
+      if (j < 0 && targetA) j = namesAggless.findIndex(n => n === targetA);
       if (j >= 0) { idxMet = j; break; }
     }
   }
 
-  // Último recurso: heurística numérica PERO excluyendo columnas de dimensión típicas
+  // Fallback NUMÉRICO (solo si no pudimos encontrar la primaria), excluye campos de dimensión
   if (idxMet < 0) {
-    const dimLike = new Set(['comuna','barrio','nombre','name','id','codigo','clave','granularidad','nivel','figura']);
+    const dimLike = /^(barrio|comuna|nombre|name|id|codigo|clave|granularidad|nivel|figura|direccion|evento)$/;
     const rows = tableLike?.tables?.DEFAULT?.rows || [];
     const sampleN = Math.min(rows.length, 50);
-    let best = -1, bestScore = -1;
-    for (let j=0;j<headers.length;j++) {
+    let best=-1, bestScore=-1;
+    for (let j=0;j<H.length;j++) {
       if (j === idxDim) continue;
-      const nn = namesN[j];
-      if (dimLike.has(nn)) continue;
-      // si aparece en fields.dimensions, descartalo
-      if (Array.isArray(fields?.dimensions)) {
-        const isDim = fields.dimensions.some(d=>{
-          const did = String(d.id||''); const dn = cleanString(d.name||'');
-          return ids[j]===did || namesN[j]===dn;
-        });
-        if (isDim) continue;
-      }
+      const nm = namesN[j];
+      const ag = namesAggless[j];
+      if (dimLike.test(nm) || dimLike.test(ag)) continue;
       let hits=0, seen=0;
       for (let r=0;r<sampleN;r++) {
         const n = toNumberLoose(rows[r]?.[j]);
-        if (Number.isFinite(n)) hits++;
-        seen++;
+        if (Number.isFinite(n)) hits++; seen++;
       }
-      const score = seen ? hits/seen : 0;
-      if (score > bestScore && score >= 0.6) { bestScore=score; best=j; }
+      const score = seen ? (hits/seen) : 0;
+      if (score > bestScore && score >= 0.8) { bestScore=score; best=j; }
     }
     idxMet = best;
   }
 
   return { idxDim, idxMet };
 }
+
 
 
 /* ============================================================================
