@@ -365,67 +365,86 @@ function resolveIndices(tableLike, style) {
   const headers = tableLike?.tables?.DEFAULT?.headers || [];
   const names   = headers.map(h => (h.name || h.id || '').toString());
   const ids     = headers.map(h => (h.id || '').toString());
+  const namesN  = names.map(cleanString);
+
   const fbc     = tableLike?.fieldsByConfigId || {};
   const fields  = tableLike?.fields || {};
+
   let idxDim = -1, idxMet = -1;
 
-  // 1) Dimensión desde config (fieldsByConfigId.geoDimension)
-  const fbd = fbc?.geoDimension?.[0];
-  if (fbd) {
-    const byName = names.findIndex(n => n === String(fbd.name || ''));
-    const byId   = ids.findIndex(i => i === String(fbd.id   || ''));
-    idxDim = (byName >= 0 ? byName : byId);
+  // --- DIMENSIÓN: primero lo que definís en el panel (geoDimension)
+  const gd = fbc?.geoDimension?.[0];
+  if (gd) {
+    const nid   = String(gd.id   || '');
+    const nname = cleanString(gd.name || '');
+    idxDim = ids.indexOf(nid);
+    if (idxDim < 0 && nname) idxDim = namesN.indexOf(nname);
   }
-
-  // 2) Si no apareció, preferencia explícita según nivel en estilos
+  // fallback explícito por nivel en estilos
   if (idxDim < 0) {
-    const preferred = (style?.nivelJerarquia === 'comuna')
+    const prefs = (style?.nivelJerarquia === 'comuna')
       ? ['comuna','cod_comuna','codigo comuna','id comuna']
       : ['barrio','nombre','nombre_barrio','barrio nombre'];
-    const want = new Set(preferred.map(x => cleanString(x)));
-    idxDim = names.findIndex(n => want.has(cleanString(n)));
+    const want = new Set(prefs.map(cleanString));
+    idxDim = namesN.findIndex(n => want.has(n));
   }
-
-  // 3) Fallback: heurística
-  if (idxDim < 0) idxDim = names.findIndex(n => /barrio|comuna|nombre|name|texto/i.test(n));
+  // último recurso
+  if (idxDim < 0) idxDim = namesN.findIndex(n => /barrio|comuna|nombre|name|texto/.test(n));
   if (idxDim < 0 && headers.length) idxDim = 0;
 
-  // MÉTRICA: del config si existe
-  const fbm = fbc?.metricPrimary?.[0];
-  if (fbm) {
-    const byName = names.findIndex(n => n === String(fbm.name || ''));
-    const byId   = ids.findIndex(i => i === String(fbm.id   || ''));
-    idxMet = (byName >= 0 ? byName : byId);
+  // --- MÉTRICA PRIMARIA: siempre la del panel (metricPrimary)
+  const mp = fbc?.metricPrimary?.[0];
+  if (mp) {
+    const mid   = String(mp.id   || '');
+    const mname = cleanString(mp.name || '');
+    idxMet = ids.indexOf(mid);
+    if (idxMet < 0 && mname) idxMet = namesN.indexOf(mname);
   }
 
-  // Si no, intentamos por fields.metrics
-  if (idxMet < 0 && Array.isArray(fields.metrics)) {
+  // Si por alguna razón no apareció, probá con fields.metrics (en orden)
+  if (idxMet < 0 && Array.isArray(fields?.metrics) && fields.metrics.length) {
     for (const f of fields.metrics) {
-      const nm = String(f.name || f.id || '');
-      let j = names.findIndex(n => n === nm);
-      if (j < 0) j = ids.findIndex(i => i === nm);
+      const mid   = String(f.id   || '');
+      const mname = cleanString(f.name || '');
+      let j = ids.indexOf(mid);
+      if (j < 0 && mname) j = namesN.indexOf(mname);
       if (j >= 0) { idxMet = j; break; }
     }
   }
 
-  // Último recurso: heurística numérica
+  // Último recurso: heurística numérica PERO excluyendo columnas de dimensión típicas
   if (idxMet < 0) {
+    const dimLike = new Set(['comuna','barrio','nombre','name','id','codigo','clave','granularidad','nivel','figura']);
     const rows = tableLike?.tables?.DEFAULT?.rows || [];
-    const sampleN = Math.min(rows.length, 25);
-    outer: for (let j=0; j<headers.length; j++) {
+    const sampleN = Math.min(rows.length, 50);
+    let best = -1, bestScore = -1;
+    for (let j=0;j<headers.length;j++) {
       if (j === idxDim) continue;
+      const nn = namesN[j];
+      if (dimLike.has(nn)) continue;
+      // si aparece en fields.dimensions, descartalo
+      if (Array.isArray(fields?.dimensions)) {
+        const isDim = fields.dimensions.some(d=>{
+          const did = String(d.id||''); const dn = cleanString(d.name||'');
+          return ids[j]===did || namesN[j]===dn;
+        });
+        if (isDim) continue;
+      }
       let hits=0, seen=0;
-      for (let r=0; r<sampleN; r++) {
+      for (let r=0;r<sampleN;r++) {
         const n = toNumberLoose(rows[r]?.[j]);
         if (Number.isFinite(n)) hits++;
         seen++;
       }
-      if (seen && hits/seen >= 0.6) { idxMet = j; break outer; }
+      const score = seen ? hits/seen : 0;
+      if (score > bestScore && score >= 0.6) { bestScore=score; best=j; }
     }
+    idxMet = best;
   }
 
   return { idxDim, idxMet };
 }
+
 
 /* ============================================================================
    Agregado por barrio/comuna: valor para colorear
