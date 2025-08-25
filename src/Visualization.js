@@ -367,7 +367,7 @@ function resolveIndices(tableLike, style) {
   const ids   = H.map(h => (h.id   ?? '').toString());
   const namesN = names.map(cleanString);
 
-  // quita “sum/suma/total/avg/prom…” y signos; queda el nombre “puro”
+  // quita agregadores del nombre (Suma/Avg/…)
   const stripAgg = (s) => cleanString(s)
     .replace(/\b(sum|suma|total|conteo|count|avg|prom|promedio|min|max|media|acum|acumulado)\b/g, '')
     .replace(/[(){}[\]°%:|]/g, '')
@@ -375,11 +375,13 @@ function resolveIndices(tableLike, style) {
     .trim();
 
   const namesAggless = names.map(stripAgg);
-
   const byId      = new Map(ids.map((id,i)=>[id,i]));
   const byName    = new Map(names.map((nm,i)=>[nm,i]));
   const byNameN   = new Map(namesN.map((nm,i)=>[nm,i]));
   const byAggless = new Map(namesAggless.map((nm,i)=>[nm,i]));
+
+  const fbc    = tableLike?.fieldsByConfigId || {};
+  const fields = tableLike?.fields || {};
 
   const findBySpec = (spec) => {
     if (!spec) return -1;
@@ -387,25 +389,17 @@ function resolveIndices(tableLike, style) {
     const sname = String(spec.name ?? '');
     const sN = cleanString(sname);
     const sA = stripAgg(sname);
-
     let j = -1;
     if (sid) j = byId.get(sid) ?? -1;
     if (j < 0 && sname) j = byName.get(sname) ?? -1;
     if (j < 0 && sN)    j = byNameN.get(sN) ?? -1;
     if (j < 0 && sA)    j = byAggless.get(sA) ?? -1;
-    if (j < 0 && sA) {
-      // contains-match de último recurso
-      j = namesAggless.findIndex(n => n === sA || n.endsWith(' ' + sA) || n.startsWith(sA + ' '));
-    }
+    if (j < 0 && sA)    j = namesAggless.findIndex(n => n === sA || n.endsWith(' ' + sA) || n.startsWith(sA + ' '));
     return j;
   };
 
-  const fbc    = tableLike?.fieldsByConfigId || {};
-  const fields = tableLike?.fields || {};
-
-  // ------------------- DIMENSIÓN (fijar Barrio/Comuna) -------------------
+  // ------------------- DIMENSIÓN (fijada a geoDimension) -------------------
   let idxDim = findBySpec(fbc?.geoDimension?.[0]);
-
   if (idxDim < 0) {
     const preferred = (style?.nivelJerarquia === 'comuna')
       ? ['comuna','cod_comuna','codigo comuna','id comuna']
@@ -416,34 +410,15 @@ function resolveIndices(tableLike, style) {
   if (idxDim < 0) idxDim = namesN.findIndex(n => /barrio|comuna|nombre|name|texto/.test(n));
   if (idxDim < 0 && H.length) idxDim = 0;
 
-  // ------------------- MÉTRICA PRIMARIA (SIEMPRE la del panel) -------------------
-  let idxMet = findBySpec(fbc?.metricPrimary?.[0]);
-
-  // Si aún no apareció, intentá localizarla vía fields.metrics (por id/nombre normalizado)
-  if (idxMet < 0 && Array.isArray(fields?.metrics) && fields.metrics.length) {
-    const mp = fbc?.metricPrimary?.[0] || {};
-    const targetId = String(mp.id   ?? '');
-    const targetNm = String(mp.name ?? '');
-    const targetN  = cleanString(targetNm);
-    const targetA  = stripAgg(targetNm);
-
-    for (const f of fields.metrics) {
-      const id = String(f.id ?? '');
-      const nm = String(f.name ?? '');
-      if (id && id === targetId) {
-        const j = byId.get(id);
-        if (j >= 0) { idxMet = j; break; }
-      }
-      const nN = cleanString(nm);
-      const nA = stripAgg(nm);
-      let j = byName.get(nm) ?? byNameN.get(nN) ?? byAggless.get(nA);
-      if (j < 0 && targetA) j = namesAggless.findIndex(n => n === targetA);
-      if (j >= 0) { idxMet = j; break; }
-    }
+  // ------------------- MÉTRICA PRIMARIA (SOLO metricPrimary) -------------------
+  let idxMet = -1;
+  const mp = fbc?.metricPrimary?.[0];
+  if (mp) {
+    idxMet = findBySpec(mp);
   }
 
-  // Fallback NUMÉRICO (solo si no pudimos encontrar la primaria), excluye campos de dimensión
-  if (idxMet < 0) {
+  // Si NO vino metricPrimary (caso raro), recién ahí heurística
+  if (idxMet < 0 && !mp) {
     const dimLike = /^(barrio|comuna|nombre|name|id|codigo|clave|granularidad|nivel|figura|direccion|evento)$/;
     const rows = tableLike?.tables?.DEFAULT?.rows || [];
     const sampleN = Math.min(rows.length, 50);
@@ -466,6 +441,7 @@ function resolveIndices(tableLike, style) {
 
   return { idxDim, idxMet };
 }
+
 
 
 
