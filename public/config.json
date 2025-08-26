@@ -192,6 +192,9 @@
       "id": "branding",
       "label": "Branding",
       "elements": [
+        { "id": "showLogo",     "label": "Mostrar logo", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL PNG/SVG)", "type": "TEXTAREA", "defaultValue": "", "helpText": "Pega aquí un data URL (data:image/png;base64,...) para evitar bloqueos CSP. Si está vacío, se usa 'URL del logo'." },
+
         { "id": "logoUrl",      "label": "URL del logo (https o gs://)", "type": "TEXTINPUT", "defaultValue": "" },
         {
           "id": "logoPosition",

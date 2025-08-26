@@ -603,53 +603,114 @@ function makeRankCtx(mapValues, opts = { highIsOne: true }) {
 ============================================================================ */
 function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
-  let out = String(tpl || '')
-    .replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel)
-    .replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d')
-    .replace(/\{\{\s*rank\s*\}\}/gi, () => {
-      const r = rankCtx?.rankOf?.(v);
-      return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
-    })
-    .replace(/\{\{\s*percentil\s*\}\}/gi, () => {
-      const p = rankCtx?.percentileOf?.(v);
-      return Number.isFinite(p) ? `${p}º` : 's/d';
-    })
-    // {{col:Nombre o id}}
-    .replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
-      const raw = getCol(rowByName, String(colName || '').trim());
-      const n = Number(raw);
-      return Number.isFinite(n) ? fmt0(n) : (raw ?? '');
-    });
 
-  // {{tasa:Num, Den[, factor]}}
+  // Extrae números de una celda que trae "valores, separadas, por comas"
+  // Soporta miles con punto y decimales con coma o con punto (ej: "225.970,3,1279")
+  const extractNums = (raw) => {
+    const s = String(raw ?? '');
+    const m = s.match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:\.\d+)?/g) || [];
+    return m.map(toNumberLoose).filter(Number.isFinite);
+  };
+  const getCsvNum = (colKey, idx1) => {
+    const raw = getCol(rowByName, String(colKey).trim());
+    const nums = extractNums(raw);
+    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
+    return nums[i];
+  };
+  const getCsvTxt = (colKey, idx1) => {
+    const raw = getCol(rowByName, String(colKey).trim());
+    const parts = String(raw ?? '').split(/\s*,\s*/);
+    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
+    return parts[i] ?? '';
+  };
+
+  let out = String(tpl || '');
+
+  // Básicos
+  out = out.replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel);
+  out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d');
+
+  // Rank / percentil (1 = mayor)
+  out = out.replace(/\{\{\s*rank\s*\}\}/gi, () => {
+    const r = rankCtx?.rankOf?.(v);
+    return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
+  });
+  out = out.replace(/\{\{\s*percentil\s*\}\}/gi, () => {
+    const p = rankCtx?.percentileOf?.(v);
+    return Number.isFinite(p) ? `${p}º` : 's/d';
+  });
+
+  // ---- CSV: números y texto por índice (1-based) ----
+  out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
+    (_m, colKey, idxStr) => {
+      const val = getCsvNum(colKey, idxStr);
+      return Number.isFinite(val) ? fmt0(val) : 's/d';
+    }
+  );
+  out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
+    (_m, colKey, idxStr) => getCsvTxt(colKey, idxStr)
+  );
+  // (A/B)*factor usando posiciones del CSV
+  out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, iNumStr, iDenStr, factorStr) => {
+      const num = getCsvNum(colKey, iNumStr);
+      const den = getCsvNum(colKey, iDenStr);
+      const factor = Number(factorStr ?? 100);
+      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
+        ? (num / den) * (Number.isFinite(factor) ? factor : 100) : NaN;
+      return Number.isFinite(t) ? fmt0(t) : 's/d';
+    }
+  );
+  // num/den a partir de posiciones del CSV
+  out = out.replace(/\{\{\s*avgByCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
+    (_m, colKey, iNumStr, iDenStr) => {
+      const num = getCsvNum(colKey, iNumStr);
+      const den = getCsvNum(colKey, iDenStr);
+      const vv = (Number.isFinite(num) && Number.isFinite(den) && den > 0) ? (num / den) : NaN;
+      return Number.isFinite(vv) ? fmt0(vv) : 's/d';
+    }
+  );
+
+  // Columna por nombre o id (ej: {{col:Comuna}} o {{col:col4}})
+  out = out.replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
+    const raw = getCol(rowByName, String(colName || '').trim());
+    const n = Number(raw);
+    return Number.isFinite(n) ? fmt0(n) : (raw ?? '');
+  });
+
+  // Tasa con columnas agregadas (sum(num)/sum(den)*factor)
   out = out.replace(/\{\{\s*tasa\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, numCol, denCol, factorStr) => {
-      const num = Number(getCol(rowByName, String(numCol).trim()));
-      const den = Number(getCol(rowByName, String(denCol).trim()));
+      const num = getStat(rowByName, String(numCol).trim(), 'sum');
+      const den = getStat(rowByName, String(denCol).trim(), 'sum');
       const factor = Number(factorStr ?? 100);
-      const tasa = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
-        ? (num / den) * (Number.isFinite(factor) ? factor : 100)
-        : NaN;
-      return Number.isFinite(tasa) ? fmt0(tasa) : 's/d';
-    });
+      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
+        ? (num / den) * (Number.isFinite(factor) ? factor : 100) : NaN;
+      return Number.isFinite(t) ? fmt0(t) : 's/d';
+    }
+  );
 
-  // {{sum/avg/min/max:Col|id}}
+  // sum/avg/min/max sobre columnas agregadas
   out = out.replace(/\{\{\s*(sum|avg|min|max)\s*:\s*([^}]+?)\s*\}\}/gi,
     (_m, op, col) => fmt0(getStat(rowByName, String(col).trim(), op.toLowerCase()))
   );
 
-  // {{count}}  ó  {{count:Col|id}}
+  // count: usa Record Count si existe, si no cuenta filas agregadas
   out = out.replace(/\{\{\s*count(?:\s*:\s*([^}]+))?\s*\}\}/gi,
     (_m, colOpt) => {
-      const v = (colOpt && colOpt.trim())
-        ? getStat(rowByName, colOpt.trim(), 'count')
-        : getStat(rowByName, '', 'count');
-      return fmt0(v);
+      if (colOpt && colOpt.trim()) return fmt0(getStat(rowByName, colOpt.trim(), 'count'));
+      const candidates = ['Record Count','RECORD_COUNT','record_count','Cant_Reuniones','Reuniones','Cantidad Reuniones'];
+      for (const k of candidates) {
+        const v = Number(getCol(rowByName, k));
+        if (Number.isFinite(v)) return fmt0(v);
+      }
+      return fmt0(getStat(rowByName, '', 'count'));
     }
   );
 
   return out;
 }
+
 
 /* ============================================================================
    Borde auto-contraste + Logo (gs:// → https)
