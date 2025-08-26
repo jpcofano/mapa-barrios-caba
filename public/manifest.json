@@ -1,25 +1,25 @@
 {
   "name": "Barrios CABA Map",
-  "version": "2.1.7",
+  "version": "2.1.9",
   "organization": "Fieldtech",
   "description": "Mapa de barrios CABA con coropletas",
   "logoUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Logo.png",
   "organizationUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "supportUrl": "https://storage.googleapis.com/mapa-barrios-degcba/support.html",
   "privacyPolicyUrl": "https://storage.googleapis.com/mapa-barrios-degcba/privacy.html",
-  "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/barrios-caba-map-v2025-s/",
+  "packageUrl": "https://storage.googleapis.com/mapa-barrios-degcba/barrios-caba-map-v2025-u/",
   "devMode": false,
   "sandboxMode": "IFRAME",
   "components": [
     {
-      "id": "70455jbnkhjsjkmssd0barrios-caba-map-v2025s",
+      "id": "70455jbnkhjsjkmsdfdehyss45d0barrios-caba-map-v2025u",
       "name": "Mapa Barrios CABA",
       "description": "Polígonos de barrios; coloreo por métrica",
       "iconUrl": "https://storage.googleapis.com/mapa-barrios-degcba/Icon.png",
       "resource": {
-        "js": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-s/Visualization.js",
-        "config": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-s/config.json",
-        "css": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-s/Visualization.css"
+        "js": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-u/Visualization.js",
+        "config": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-u/config.json",
+        "css": "gs://mapa-barrios-degcba/barrios-caba-map-v2025-u/Visualization.css"
       }
     }
   ]

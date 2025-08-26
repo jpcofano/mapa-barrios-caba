@@ -196,16 +196,18 @@ function readStyle(message = {}) {
   };
 
   return {
+    // jerarquía + geo
     nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
     geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
 
+    // color
     colorScale: (s.colorScale && s.colorScale.value) || 'greenToRed',
     invertScale: !!(s.invertScale && s.invertScale.value),
     colorPalette: getPalette(),
 
+    // estilo de shapes
     opacity: num(s.opacity, 0.45),
     colorMissing: readColor(s.colorMissing, '#cccccc'),
-
     showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
     legendPosition: (s.legendPosition && s.legendPosition.value) || 'bottomright',
     showLabels: !!(s.showLabels && s.showLabels.value),
@@ -215,7 +217,7 @@ function readStyle(message = {}) {
     borderWidth: num(s.borderWidth, 1),
     borderOpacity: num(s.borderOpacity, 1),
 
-    // Popup / Tooltip
+    // Tooltip / Popup
     popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
     tooltipFormat: (s.tooltipFormat && s.tooltipFormat.value) || '',
 
@@ -233,12 +235,19 @@ function readStyle(message = {}) {
     categoryOtherColor: readColor(s.categoryOtherColor, '#E0E0E0'),
 
     // Branding (logo)
+    showLogo: (s.showLogo && s.showLogo.value !== undefined) ? !!s.showLogo.value : true,
+    logoDataUrl: ((s.logoDataUrl && s.logoDataUrl.value) || '').toString().trim(), // NUEVO: prioridad
     logoUrl: (s.logoUrl && s.logoUrl.value) || '',
     logoPosition: (s.logoPosition && s.logoPosition.value) || 'bottomleft',
     logoWidthPx: num(s.logoWidthPx, 56),
-    logoOpacity: num(s.logoOpacity, 0.9)
+    logoOpacity: num(s.logoOpacity, 0.9),
+    
+  // modo tamaño en % o px
+  logoWidthMode: (s.logoWidthMode && s.logoWidthMode.value) || 'px',
+  logoWidthPercent: num(s.logoWidthPercent, 10)
   };
 }
+
 
 /* ============================================================================
    Nombres de feature
@@ -771,64 +780,84 @@ async function toDataUrlSafe(url) {
 }
 
 function renderLogo(mapContainerEl, style, state) {
+  // limpiar anterior
   if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
+  if (state.logoResizeObs) { try { state.logoResizeObs.disconnect(); } catch {} state.logoResizeObs = null; }
 
-  const raw = (style && style.logoUrl) ? String(style.logoUrl).trim() : '';
-  if (!raw) return;
+  // toggle
+  if (!style.showLogo) return;
 
-  // Normalizaciones
-  let src = normalizeGcsUrl(raw);                               // gs:// → https://storage.googleapis.com/…
-  src = toDriveThumbnail(src, style.logoWidthPx || 56);         // Drive → thumbnail permitido por CSP
+  // 1) data: embebido → prioridad (CSP-safe)
+  let src = (style.logoDataUrl || '').trim();
+
+  // 2) si no hay data:, usar URL (Drive thumbnail recomendado). Sin fetch.
+  if (!src) {
+    let url = normalizeGcsUrl((style.logoUrl || '').trim());
+    url = toDriveThumbnail(url, style.logoWidthPx || 160);
+    if (!url) return;
+    if (!hostAllowedForImg(url)) {
+      console.warn('[Logo] Host no permitido por CSP. Pegá un data: o usa Drive thumbnail.');
+      return;
+    }
+    src = url;
+  }
 
   const img = document.createElement('img');
-  img.alt = 'Logo'; img.draggable = false;
+  img.alt = 'Logo';
+  img.draggable = false;
+  img.src = src;
+
+  // función local para calcular el ancho final (px o %)
+  const computeWidthPx = () => {
+    if ((style.logoWidthMode || 'px') === 'percent') {
+      const cw = mapContainerEl?.clientWidth || mapContainerEl?.offsetWidth || 800;
+      const pct = Math.max(1, Math.min(100, Number(style.logoWidthPercent || 10)));
+      return Math.max(16, Math.round((cw * pct) / 100));
+    }
+    return Math.max(16, Number(style.logoWidthPx || 160));
+  };
+
+  // ⚠️ Garantías anti-deformación
+  img.removeAttribute('width');
+  img.removeAttribute('height');
+
   Object.assign(img.style, {
     position: 'absolute',
-    width: ((style.logoWidthPx || 56) | 0) + 'px',
+    width: computeWidthPx() + 'px',  // solo controlamos el ANCHO
+    height: 'auto',                  // alto automático
+    aspectRatio: 'auto',             // usa la relación natural
+    objectFit: 'contain',            // por si un contenedor fijara alto
     opacity: String(Math.max(0, Math.min(1, Number(style.logoOpacity ?? 0.9)))),
     pointerEvents: 'none',
     userSelect: 'none',
     filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.25))',
     zIndex: '9999'
   });
-  const pad = '10px'; const pos = (style.logoPosition || 'bottomleft');
+
+  const pad = '10px';
+  const pos = (style.logoPosition || 'bottomleft');
   img.style.top = (pos.startsWith('top') ? pad : '');
   img.style.bottom = (pos.startsWith('bottom') ? pad : '');
   img.style.left = (pos.endsWith('left') ? pad : '');
   img.style.right = (pos.endsWith('right') ? pad : '');
 
-  // Montaje
-  const mount = () => {
-    const el = mapContainerEl;
-    if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-    el.appendChild(img);
-    state.logoEl = img;
-  };
+  // asegurar contenedor posicionado
+  const el = mapContainerEl;
+  if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+  el.appendChild(img);
+  state.logoEl = img;
 
-  // Fallback si el host no está permitido por CSP → intenta inline data:
-  (async () => {
-    try {
-      const tryInline = async () => {
-        try {
-          const dataUrl = await toDataUrlSafe(src);
-          img.src = dataUrl; mount();
-        } catch (e) {
-          console.warn('[Logo] No se pudo convertir a data URL:', e);
-        }
-      };
-
-      // Si ya es data: o host permitido → directo
-      if (src.startsWith('data:') || hostAllowedForImg(src)) {
-        img.src = src; mount(); return;
-      }
-
-      // No permitido (p.ej. storage.googleapis.com): intento convertir a data:
-      await tryInline();
-    } catch (e) {
-      console.warn('[Logo] Error general al cargar logo:', e);
-    }
-  })();
+  // responsive cuando el modo es percent
+  if ((style.logoWidthMode || 'px') === 'percent' && 'ResizeObserver' in window) {
+    const ro = new ResizeObserver(() => {
+      if (!state.logoEl) return;
+      state.logoEl.style.width = computeWidthPx() + 'px';
+    });
+    ro.observe(mapContainerEl);
+    state.logoResizeObs = ro;
+  }
 }
+
 
 
 /* ============================================================================
@@ -866,7 +895,7 @@ export default function drawVisualization(container, message = {}) {
 
   // mapa
   if (!__leafletState.map) {
-    __leafletState.map = L.map(container, { zoomControl: true, attributionControl: true });
+    __leafletState.map = L.map(container, { zoomControl: true, attributionControl: false });
   } else {
     const current = __leafletState.map.getContainer();
     if (current && current !== container) {
