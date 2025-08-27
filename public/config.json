@@ -14,8 +14,7 @@
           "id": "param_nivel",
           "label": "Parámetro Nivel (Barrio/Comuna)",
           "type": "DIMENSION",
-          "options": { "min": 0, "max": 1 },
-          "helpText": "Vinculá aquí el parámetro 'param_nivel' del informe (valores 'Barrio' o 'Comuna')."
+          "options": { "min": 0, "max": 1 }
         },
         {
           "id": "metricPrimary",
@@ -79,7 +78,7 @@
         },
         {
           "id": "invertScale",
-          "label": "Invertir escala (Rojo → Verde / etc.)",
+          "label": "Invertir escala",
           "type": "CHECKBOX",
           "defaultValue": false
         },
@@ -89,19 +88,19 @@
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Ninguna (usar escala base)", "value": "" },
-            { "label": "viridis",     "value": "viridis" },
-            { "label": "magma",       "value": "magma" },
-            { "label": "plasma",      "value": "plasma" },
-            { "label": "cividis",     "value": "cividis" },
-            { "label": "turbo",       "value": "turbo" },
-            { "label": "Spectral",    "value": "Spectral" },
-            { "label": "Rojos",       "value": "reds" },
-            { "label": "Verdes",      "value": "greens" },
-            { "label": "Azules",      "value": "blues" },
-            { "label": "Violetas",    "value": "purples" },
-            { "label": "Naranjas",    "value": "oranges" },
-            { "label": "soloAmarillo (máximo amarillo)", "value": "soloAmarillo" },
-            { "label": "coolToYellow (frío→amarillo)",   "value": "coolToYellow" }
+            { "label": "viridis",   "value": "viridis" },
+            { "label": "magma",     "value": "magma" },
+            { "label": "plasma",    "value": "plasma" },
+            { "label": "cividis",   "value": "cividis" },
+            { "label": "turbo",     "value": "turbo" },
+            { "label": "Spectral",  "value": "Spectral" },
+            { "label": "Rojos",     "value": "reds" },
+            { "label": "Verdes",    "value": "greens" },
+            { "label": "Azules",    "value": "blues" },
+            { "label": "Violetas",  "value": "purples" },
+            { "label": "Naranjas",  "value": "oranges" },
+            { "label": "soloAmarillo",  "value": "soloAmarillo" },
+            { "label": "coolToYellow",  "value": "coolToYellow" }
           ],
           "defaultValue": ""
         },
@@ -129,12 +128,8 @@
       "id": "categories",
       "label": "Colores por categorías (1/2/3)",
       "elements": [
-        {
-          "id": "categoryMode",
-          "label": "Activar modo categórico (si la métrica no es 1/2/3 automáticamente)",
-          "type": "CHECKBOX",
-          "defaultValue": false
-        },
+        { "id": "categoryMode",   "label": "Activar modo categórico", "type": "CHECKBOX", "defaultValue": false },
+
         { "id": "category1Label", "label": "Etiqueta Cat. 1", "type": "TEXTINPUT", "defaultValue": "Categoría 1" },
         { "id": "category1Value", "label": "Valor Cat. 1",    "type": "NUMBER",    "defaultValue": 1 },
         { "id": "category1Color", "label": "Color Cat. 1",    "type": "FILL_COLOR","defaultValue": "#F4B400" },
@@ -174,7 +169,7 @@
           ],
           "defaultValue": "bottomright"
         },
-        { "id": "showLabels",     "label": "Mostrar etiquetas (tooltip centrado)", "type": "CHECKBOX", "defaultValue": false }
+        { "id": "showLabels",     "label": "Mostrar tooltip (hover)", "type": "CHECKBOX", "defaultValue": false }
       ]
     },
     {
@@ -189,7 +184,7 @@
         },
         {
           "id": "tooltipFormat",
-          "label": "Formato del tooltip (hover) — si se deja vacío, usa el popup",
+          "label": "Formato del tooltip (hover) — vacío = usa popup",
           "type": "TEXTINPUT",
           "defaultValue": ""
         }
@@ -204,11 +199,10 @@
         { "id": "logoDataUrl",
           "label": "Logo embebido (data: URL PNG/SVG)",
           "type": "TEXTINPUT",
-          "defaultValue": "",
-          "helpText": "Pegá un data URL (data:image/png;base64,...) para evitar bloqueos CSP. Si está vacío, se usa 'URL del logo'."
+          "defaultValue": ""
         },
 
-        { "id": "logoUrl", "label": "URL del logo (https o gs://)", "type": "TEXTINPUT", "defaultValue": "" },
+        { "id": "logoUrl",      "label": "URL del logo (https/Drive)", "type": "TEXTINPUT", "defaultValue": "" },
 
         {
           "id": "logoPosition",
@@ -241,9 +235,8 @@
           "options": { "min": 2, "max": 30, "step": 1 }
         },
 
-        { "id": "logoOpacity", "label": "Opacidad del logo", "type": "OPACITY", "defaultValue": 0.9 }
+        { "id": "logoOpacity",  "label": "Opacidad del logo", "type": "OPACITY", "defaultValue": 0.9 }
       ]
     }
-
-  ]  
-} 
+  ]
+}

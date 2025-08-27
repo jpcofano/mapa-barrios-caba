@@ -1,13 +1,15 @@
-// Community Viz 2025 — Leaflet + dscc (bundle-first) + Normalizador + DEBUG
-// Rank descendente (1 = máximo) + agregación fija por dimensión elegida + lookup por nombre e id (col1/col2…)
-// Tooltip/popup avanzados + paletas + logo compatible con gs:// → https + data: fallback opcional
+// Community Viz — Leaflet + dscc (bundle-first) + Normalizador + DEBUG
+// Param "Barrio/Comuna" → prioridad; fallback Estilo; fallback heurística.
+// CSV robusto; ranking descendente (1 = máx); leyenda; logo con px/%; paletas modernas.
 
 import * as dsccImported from '@google/dscc';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
-import geojsonText from './barrioscaba.geojson?raw';
-import geojsonComunasText from './comunascaba.geojson?raw'; // ← nuevo
+
+// GeoJSON (Barrio + Comuna)
+import geojsonBarriosText  from './barrioscaba.geojson?raw';
+import geojsonComunasText  from './comunascaba.geojson?raw';  // ← asegurate de tener este archivo
 
 /* ============================================================================
    DEBUG
@@ -76,7 +78,7 @@ const ensureDsccScript = (() => {
 })();
 
 /* ============================================================================
-   Sanitizador de query (NBSP, espacios colados)
+   Sanitizador query (NBSP, espacios colados en vizId/path)
 ============================================================================ */
 (function () {
   try {
@@ -101,15 +103,15 @@ const ensureDsccScript = (() => {
    GeoJSON
 ============================================================================ */
 let GEOJSON; // barrios
-try { GEOJSON = JSON.parse(geojsonText); }
+try { GEOJSON = JSON.parse(geojsonBarriosText); }
 catch (e) { err('[Viz] GeoJSON barrios inválido:', e); GEOJSON = { type: 'FeatureCollection', features: [] }; }
 
-let GEOJSON_COMUNAS = null; // comunas (nuevo)
+let GEOJSON_COMUNAS = null; // comunas
 try { GEOJSON_COMUNAS = JSON.parse(geojsonComunasText); }
 catch (e) { warn('[Viz] GeoJSON comunas no disponible o inválido. (Cargá comunascaba.geojson)'); GEOJSON_COMUNAS = null; }
 
 /* ============================================================================
-   Helpers texto/color
+   Helpers texto/color/num
 ============================================================================ */
 function cleanString(s) {
   return String(s ?? '')
@@ -123,8 +125,22 @@ const lerp = (a,b,t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
 const rgb = (r,g,b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 
+function toNumberLoose(x) {
+  if (typeof x === 'number') return x;
+  const cand = x?.v ?? x?.value ?? x;
+  if (typeof cand === 'number') return cand;
+  let s = String(cand ?? '').replace(/\s|\u00A0/g,'').trim();
+  if (!s) return NaN;
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g,'').replace(',', '.');
+  else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g,'');
+  else s = s.replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+const coerceCell = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
+
 /* ============================================================================
-   Colores / paletas
+   Paletas
 ============================================================================ */
 function colorFromScale(scaleName, t, invert) {
   t = clamp01(t); if (invert) t = 1 - t;
@@ -184,7 +200,8 @@ function readStyle(message = {}) {
   const getPalette = () => {
     const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
     if (raw) {
-      const colors = raw.split(',').map(x=>x.trim()).filter(x=>/^#?[0-9a-f]{6}$/i.test(x)).map(x=>x.startsWith('#')?x:'#'+x);
+      const colors = raw.split(',').map(x=>x.trim())
+        .filter(x=>/^#?[0-9a-f]{6}$/i.test(x)).map(x=>x.startsWith('#')?x:'#'+x);
       if (colors.length) return { mode:'custom', colors };
     }
     const v = s.colorPalette && s.colorPalette.value;
@@ -201,7 +218,7 @@ function readStyle(message = {}) {
   };
 
   return {
-    // jerarquía + geo
+    // geografía
     nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
     geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
 
@@ -210,7 +227,7 @@ function readStyle(message = {}) {
     invertScale: !!(s.invertScale && s.invertScale.value),
     colorPalette: getPalette(),
 
-    // estilo de shapes
+    // estilo shapes
     opacity: num(s.opacity, 0.45),
     colorMissing: readColor(s.colorMissing, '#cccccc'),
     showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
@@ -222,11 +239,11 @@ function readStyle(message = {}) {
     borderWidth: num(s.borderWidth, 1),
     borderOpacity: num(s.borderOpacity, 1),
 
-    // Tooltip / Popup
+    // tooltip/popup
     popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
     tooltipFormat: (s.tooltipFormat && s.tooltipFormat.value) || '',
 
-    // Categorías (opcional)
+    // categorías (opcional 1/2/3)
     categoryMode: !!(s.categoryMode && s.categoryMode.value),
     cat1Label: (s.category1Label && s.category1Label.value) || 'Categoría 1',
     cat1Value: num(s.category1Value, 1),
@@ -239,22 +256,20 @@ function readStyle(message = {}) {
     cat3Color: readColor(s.category3Color, '#00ACC1'),
     categoryOtherColor: readColor(s.categoryOtherColor, '#E0E0E0'),
 
-    // Branding (logo)
+    // branding
     showLogo: (s.showLogo && s.showLogo.value !== undefined) ? !!s.showLogo.value : true,
-    logoDataUrl: ((s.logoDataUrl && s.logoDataUrl.value) || '').toString().trim(), // NUEVO: prioridad
+    logoDataUrl: ((s.logoDataUrl && s.logoDataUrl.value) || '').toString().trim(),
     logoUrl: (s.logoUrl && s.logoUrl.value) || '',
     logoPosition: (s.logoPosition && s.logoPosition.value) || 'bottomleft',
-    logoWidthPx: num(s.logoWidthPx, 56),
+    logoWidthPx: num(s.logoWidthPx, 160),
     logoOpacity: num(s.logoOpacity, 0.9),
-
-    // modo tamaño en % o px
     logoWidthMode: (s.logoWidthMode && s.logoWidthMode.value) || 'px',
     logoWidthPercent: num(s.logoWidthPercent, 10)
   };
 }
 
 /* ============================================================================
-   Nombres de feature
+   Propiedad de nombre por feature
 ============================================================================ */
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
@@ -272,30 +287,13 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
 }
 
 /* ============================================================================
-   Números / Normalizadores
-============================================================================ */
-function toNumberLoose(x) {
-  if (typeof x === 'number') return x;
-  const cand = x?.v ?? x?.value ?? x;
-  if (typeof cand === 'number') return cand;
-  let s = String(cand ?? '').replace(/\s|\u00A0/g,'').trim();
-  if (!s) return NaN;
-  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g,'').replace(',', '.');
-  else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g,'');
-  else s = s.replace(',', '.');
-  const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
-}
-const coerceCell = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
-
-/* ============================================================================
    Normalizar tabla DEFAULT
 ============================================================================ */
 function normalizeDEFAULTTable(data) {
   const T = data?.tables?.DEFAULT;
   if (!T) return { ids: [], names: [], rows: [] };
 
-  // Caso 1: {headers, rows}
+  // Caso {headers, rows}
   if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
     const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
     let ids   = hdrObjs.map(h => h.id ?? null);
@@ -321,7 +319,7 @@ function normalizeDEFAULTTable(data) {
     return { ids, names, rows };
   }
 
-  // Caso 2: array/obj indexado
+  // Caso array/obj indexado
   let rawRows = null;
   if (Array.isArray(T)) rawRows = T;
   else if (T && typeof T === 'object') {
@@ -372,124 +370,69 @@ function toHeadersRows(norm) {
 }
 
 /* ============================================================================
-   Resolver de índices (dimensión/métrica) — FIJA la dimensión elegida
+   Resolver índices (dimensión/métrica)
 ============================================================================ */
-function resolveIndices(tableLike, style) {
-  const H = tableLike?.tables?.DEFAULT?.headers || [];
-  const names = H.map(h => (h.name ?? h.id ?? '').toString());
-  const ids   = H.map(h => (h.id   ?? '').toString());
-  const namesN = names.map(cleanString);
+function resolveIndices(message) {
+  const T = message?.tables?.DEFAULT;
+  const headers = T?.headers || [];
+  const fieldsByCfg = message?.fieldsByConfigId || {};
+  const fields = message?.fields || {};
 
-  // quita agregadores del nombre (Suma/Avg/…)
-  const stripAgg = (s) => cleanString(s)
-    .replace(/\b(sum|suma|total|conteo|count|avg|prom|promedio|min|max|media|acum|acumulado)\b/g, '')
-    .replace(/[(){}[\]°%:|]/g, '')
-    .replace(/\s+/g,' ')
-    .trim();
-
-  const namesAggless = names.map(stripAgg);
-  const byId      = new Map(ids.map((id,i)=>[id,i]));
-  const byName    = new Map(names.map((nm,i)=>[nm,i]));
-  const byNameN   = new Map(namesN.map((nm,i)=>[nm,i]));
-  const byAggless = new Map(namesAggless.map((nm,i)=>[nm,i]));
-
-  const fbc    = tableLike?.fieldsByConfigId || {};
-  const fields = tableLike?.fields || {};
-
-  const findBySpec = (spec) => {
-    if (!spec) return -1;
-    const sid   = String(spec.id   ?? '');
-    const sname = String(spec.name ?? '');
-    const sN = cleanString(sname);
-    const sA = stripAgg(sname);
-    let j = -1;
-    if (sid) j = byId.get(sid) ?? -1;
-    if (j < 0 && sname) j = byName.get(sname) ?? -1;
-    if (j < 0 && sN)    j = byNameN.get(sN) ?? -1;
-    if (j < 0 && sA)    j = byAggless.get(sA) ?? -1;
-    if (j < 0 && sA)    j = namesAggless.findIndex(n => n === sA || n.endsWith(' ' + sA) || n.startsWith(sA + ' '));
-    return j;
-  };
-
-  // ------------------- DIMENSIÓN (fijada a geoDimension) -------------------
-  let idxDim = findBySpec(fbc?.geoDimension?.[0]);
-  if (idxDim < 0) {
-    const preferred = (style?.nivelJerarquia === 'comuna')
-      ? ['comuna','cod_comuna','codigo comuna','id comuna']
-      : ['barrio','nombre','nombre_barrio','barrio nombre'];
-    const want = new Set(preferred.map(cleanString));
-    idxDim = namesN.findIndex(n => want.has(n));
+  // 1) Dimensión por config
+  let dimIdx = -1;
+  if (Array.isArray(fieldsByCfg.geoDimension) && fieldsByCfg.geoDimension[0]) {
+    const id = fieldsByCfg.geoDimension[0].id;
+    dimIdx = headers.findIndex(h => h.id === id);
   }
-  if (idxDim < 0) idxDim = namesN.findIndex(n => /barrio|comuna|nombre|name|texto/.test(n));
-  if (idxDim < 0 && H.length) idxDim = 0;
-
-  // ------------------- MÉTRICA PRIMARIA (SOLO metricPrimary) -------------------
-  let idxMet = -1;
-  const mp = fbc?.metricPrimary?.[0];
-  if (mp) {
-    idxMet = findBySpec(mp);
+  // 2) fallback por nombre
+  if (dimIdx < 0) {
+    dimIdx = headers.findIndex(h => /barrio|comuna/i.test(h?.name || h?.id));
   }
+  // 3) fallback extremo
+  if (dimIdx < 0 && headers.length) dimIdx = 0;
 
-  // Si NO vino metricPrimary (caso raro), recién ahí heurística
-  if (idxMet < 0 && !mp) {
-    const dimLike = /^(barrio|comuna|nombre|name|id|codigo|clave|granularidad|nivel|figura|direccion|evento)$/;
-    const rows = tableLike?.tables?.DEFAULT?.rows || [];
-    const sampleN = Math.min(rows.length, 50);
-    let best=-1, bestScore=-1;
-    for (let j=0;j<H.length;j++) {
-      if (j === idxDim) continue;
-      const nm = namesN[j];
-      const ag = namesAggless[j];
-      if (dimLike.test(nm) || dimLike.test(ag)) continue;
-      let hits=0, seen=0;
-      for (let r=0;r<sampleN;r++) {
-        const n = toNumberLoose(rows[r]?.[j]);
-        if (Number.isFinite(n)) hits++; seen++;
-      }
-      const score = seen ? (hits/seen) : 0;
-      if (score > bestScore && score >= 0.8) { bestScore=score; best=j; }
-    }
-    idxMet = best;
+  // 4) Métrica primaria
+  let metIdx = -1;
+  if (Array.isArray(fieldsByCfg.metricPrimary) && fieldsByCfg.metricPrimary[0]) {
+    const id = fieldsByCfg.metricPrimary[0].id;
+    metIdx = headers.findIndex(h => h.id === id);
   }
+  if (metIdx < 0) {
+    // buscar primera que sea METRIC (si el motor de campos lo indica)
+    metIdx = headers.findIndex(h => fields?.[h?.id]?.concept === 'METRIC');
+  }
+  if (metIdx < 0 && headers.length > 1) metIdx = 1;
 
-  return { idxDim, idxMet };
+  return { dim: dimIdx, metric: metIdx, headers, fieldsByCfg, fields };
 }
 
 /* ============================================================================
-   Agregado por barrio/comuna: valor para colorear
+   Agregado por clave (barrio/comuna)
 ============================================================================ */
-function buildValueMap(tableLike, style) {
-  const tableRaw = tableLike?.tables?.DEFAULT || {};
-  const headers  = tableRaw.headers || [];
-  const rows     = tableRaw.rows || [];
-
-  const { idxDim, idxMet } = resolveIndices(tableLike, style);
-  if (idxDim < 0 || idxMet < 0) {
-    warn('[Viz] No se encontraron campos válidos para dimensión/métrica', { idxDim, idxMet });
+function buildValueMap(message, dimIdx, metIdx) {
+  const headers  = message?.tables?.DEFAULT?.headers || [];
+  const rows     = message?.tables?.DEFAULT?.rows || [];
+  if (dimIdx < 0 || metIdx < 0) {
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
   }
-
   const canon = (s) => normalizeKey(String(s ?? ''));
-  const map = new Map(); // barrio/comuna → SUM(métrica)
+  const map = new Map();
   for (const row of rows) {
-    const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '');
+    const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
     if (!keyRaw) continue;
     const key = canon(keyRaw);
-    const val = toNumberLoose(row?.[idxMet]);
+    const val = toNumberLoose(row?.[metIdx]);
     if (!Number.isFinite(val)) continue;
     map.set(key, (map.get(key) ?? 0) + val);
   }
-
   const values = Array.from(map.values());
   const min = values.length ? Math.min(...values) : NaN;
   const max = values.length ? Math.max(...values) : NaN;
-
-  dbg('[Viz] agregación por dimensión fija:', map.size, 'min/max:', min, max);
   return { map, min, max, count: values.length };
 }
 
 /* ============================================================================
-   Row lookup agregado por barrio/comuna + estadísticas (por nombre **e id**)
+   Row lookup agregado por barrio/comuna + estadísticas
 ============================================================================ */
 function normColKey(s){
   return String(s ?? '')
@@ -497,20 +440,17 @@ function normColKey(s){
     .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ')
     .replace(/\s+/g,' ').trim().toLowerCase();
 }
-function buildRowLookup(message, style) {
+function buildRowLookup(message, dimIdx) {
   const hdrs = message?.tables?.DEFAULT?.headers || [];
   const rows = message?.tables?.DEFAULT?.rows || [];
   const names = hdrs.map(h => h.name || h.id || '');
   const ids   = hdrs.map(h => h.id || '');
 
-  const tl = { tables:{ DEFAULT:{ headers: hdrs, rows } }, fields: message?.fields, fieldsByConfigId: message?.fieldsByConfigId };
-  const { idxDim } = resolveIndices(tl, style);
-
   const canon = (s) => normalizeKey(String(s ?? ''));
-  const aggByKey = new Map(); // clave → { __rowCount, __statsByName, __statsById, __byId, …(por nombre)}
+  const aggByKey = new Map();
 
   for (const row of rows) {
-    const keyRaw = (row?.[idxDim]?.v ?? row?.[idxDim]?.value ?? row?.[idxDim] ?? '');
+    const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
     if (!keyRaw) continue;
     const key = canon(keyRaw);
 
@@ -519,31 +459,27 @@ function buildRowLookup(message, style) {
     b.__rowCount++;
 
     for (let i = 0; i < names.length; i++) {
-      if (i === idxDim) continue;
+      if (i === dimIdx) continue;
       const nm  = names[i];
       const id  = ids[i];
       const val = (row?.[i]?.v ?? row?.[i]?.value ?? row?.[i]);
       const n   = toNumberLoose(val);
 
       if (Number.isFinite(n)) {
-        // SUM por nombre e id
         b[nm] = (b[nm] ?? 0) + n;
         if (id) b.__byId[id] = (b.__byId[id] ?? 0) + n;
 
-        // Stats por nombre
         const k = normColKey(nm);
         let st = b.__stats[k];
         if (!st) st = b.__stats[k] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
         st.sum += n; st.count += 1; if (n < st.min) st.min = n; if (n > st.max) st.max = n;
 
-        // Stats por id
         if (id) {
           let st2 = b.__statsById[id];
           if (!st2) st2 = b.__statsById[id] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
           st2.sum += n; st2.count += 1; if (n < st2.min) st2.min = n; if (n > st2.max) st2.max = n;
         }
       } else {
-        // Primero texto no nulo por nombre e id
         if (!(nm in b) && val != null) b[nm] = val;
         if (id && !(id in b.__byId) && val != null) b.__byId[id] = val;
       }
@@ -560,10 +496,10 @@ function buildRowLookup(message, style) {
 function getCol(rowAgg, key){
   if (!rowAgg) return undefined;
   const k = String(key || '');
-  if (k in rowAgg) return rowAgg[k];                 // nombre exacto
-  if (rowAgg.__byId && k in rowAgg.__byId) return rowAgg.__byId[k]; // id exacto (col2…)
+  if (k in rowAgg) return rowAgg[k];
+  if (rowAgg.__byId && k in rowAgg.__byId) return rowAgg.__byId[k];
   const want = normColKey(k);
-  for (const nm of Object.keys(rowAgg)) {           // nombre normalizado
+  for (const nm of Object.keys(rowAgg)) {
     if (normColKey(nm) === want) return rowAgg[nm];
   }
   return undefined;
@@ -609,33 +545,27 @@ function makeRankCtx(mapValues, opts = { highIsOne: true }) {
 }
 
 /* ============================================================================
-   Templating tooltip/popup
+   Template tooltip/popup (incluye CSV robusto)
 ============================================================================ */
 function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
 
-  // Extrae números de una celda que trae "valores, separadas, por comas"
-  // Soporta miles con punto y decimales con coma o con punto (ej: "225.970,3,1279")
-// Extrae números soportando miles y decimales con punto o coma.
-// e.g. "1,281,1279,677910,3" => [1281, 1279, 677910.3]
-  const extractNums = (raw) => {
-    const s = String(raw ?? '');
-    const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g; // ← clave
-    const m = s.match(rx) || [];
-    return m.map(toNumberLoose).filter(Number.isFinite);
-  };
-
-  // Para texto por “posición” en un CSV, NO cortar comas que son decimales.
-  // Divide en comas que NO están seguidas de dígito (coma no-numérica).
+  // CSV helpers
+  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
   const getCsvTxt = (colKey, idx1) => {
-    const raw = getCol(rowByName, String(colKey).trim());
-    const parts = String(raw ?? '').split(/,(?!\d)/).map(s => s.trim());
+    const raw = getColVal(rowByName, colKey);
+    const parts = String(raw ?? '').split(/,(?!\d)/).map(s => s.trim()); // no corta comas decimales
     const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
     return parts[i] ?? '';
   };
-
+  const extractNums = (raw) => {
+    const s = String(raw ?? '');
+    const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
+    const m = s.match(rx) || [];
+    return m.map(toNumberLoose).filter(Number.isFinite);
+  };
   const getCsvNum = (colKey, idx1) => {
-    const raw = getCol(rowByName, String(colKey).trim());
+    const raw = getColVal(rowByName, colKey);
     const nums = extractNums(raw);
     const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
     return nums[i];
@@ -647,7 +577,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   out = out.replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel);
   out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d');
 
-  // Rank / percentil (1 = mayor)
+  // Rank / percentil
   out = out.replace(/\{\{\s*rank\s*\}\}/gi, () => {
     const r = rankCtx?.rankOf?.(v);
     return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
@@ -657,7 +587,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     return Number.isFinite(p) ? `${p}º` : 's/d';
   });
 
-  // ---- CSV: números y texto por índice (1-based) ----
+  // CSV números / texto por índice (1-based)
   out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
     (_m, colKey, idxStr) => {
       const val = getCsvNum(colKey, idxStr);
@@ -667,7 +597,8 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
     (_m, colKey, idxStr) => getCsvTxt(colKey, idxStr)
   );
-  // (A/B)*factor usando posiciones del CSV
+
+  // Tasa con posiciones del CSV (num/den*factor)
   out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, colKey, iNumStr, iDenStr, factorStr) => {
       const num = getCsvNum(colKey, iNumStr);
@@ -678,24 +609,15 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
       return Number.isFinite(t) ? fmt0(t) : 's/d';
     }
   );
-  // num/den a partir de posiciones del CSV
-  out = out.replace(/\{\{\s*avgByCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
-    (_m, colKey, iNumStr, iDenStr) => {
-      const num = getCsvNum(colKey, iNumStr);
-      const den = getCsvNum(colKey, iDenStr);
-      const vv = (Number.isFinite(num) && Number.isFinite(den) && den > 0) ? (num / den) : NaN;
-      return Number.isFinite(vv) ? fmt0(vv) : 's/d';
-    }
-  );
 
-  // Columna por nombre o id (ej: {{col:Comuna}} o {{col:col4}})
+  // Columna directa por nombre o id
   out = out.replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
     const raw = getCol(rowByName, String(colName || '').trim());
     const n = Number(raw);
     return Number.isFinite(n) ? fmt0(n) : (raw ?? '');
   });
 
-  // Tasa con columnas agregadas (sum(num)/sum(den)*factor)
+  // Tasa sum(num)/sum(den)*factor sobre columnas agregadas
   out = out.replace(/\{\{\s*tasa\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, numCol, denCol, factorStr) => {
       const num = getStat(rowByName, String(numCol).trim(), 'sum');
@@ -712,7 +634,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     (_m, op, col) => fmt0(getStat(rowByName, String(col).trim(), op.toLowerCase()))
   );
 
-  // count: usa Record Count si existe, si no cuenta filas agregadas
+  // count: usa Record Count si existe; si no, cuenta filas agregadas
   out = out.replace(/\{\{\s*count(?:\s*:\s*([^}]+))?\s*\}\}/gi,
     (_m, colOpt) => {
       if (colOpt && colOpt.trim()) return fmt0(getStat(rowByName, colOpt.trim(), 'count'));
@@ -729,7 +651,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
 }
 
 /* ============================================================================
-   Borde auto-contraste + Logo (gs:// → https)
+   Borde auto-contraste + Logo
 ============================================================================ */
 function hexLuma(hex){
   const [r,g,b] = hexToRgb(hex).map(x=>x/255);
@@ -738,19 +660,6 @@ function hexLuma(hex){
 function autoBorderFor(fill){
   try { return (hexLuma(fill) > 0.7) ? '#666666' : '#F5F5F5'; }
   catch { return '#000'; }
-}
-function normalizeGcsUrl(u) {
-  if (!u) return u;
-  if (typeof u === 'string' && u.startsWith('gs://')) {
-    const rest = u.slice(5);
-    const slash = rest.indexOf('/');
-    if (slash > 0) {
-      const bucket = rest.slice(0, slash);
-      const key = rest.slice(slash + 1);
-      return `https://storage.googleapis.com/${bucket}/${key}`;
-    }
-  }
-  return u;
 }
 function hostAllowedForImg(u) {
   try {
@@ -763,47 +672,17 @@ function hostAllowedForImg(u) {
       || u.startsWith('data:');
   } catch { return false; }
 }
-function toDriveThumbnail(url, widthPx = 256) {
-  try {
-    const u = new URL(url);
-    // /file/d/FILE_ID/view ...
-    const m1 = u.pathname.match(/\/file\/d\/([^/]+)\//);
-    if (m1) return `https://drive.google.com/thumbnail?id=${m1[1]}&sz=w${Math.max(64, widthPx*2)}`;
-    // uc?export=view&id=FILE_ID
-    const id = u.searchParams.get('id');
-    if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w${Math.max(64, widthPx*2)}`;
-  } catch {}
-  return url;
-}
-async function toDataUrlSafe(url) {
-  const res = await fetch(url, { mode: 'cors' });
-  const blob = await res.blob();
-  return await new Promise((ok, ko) => {
-    const fr = new FileReader();
-    fr.onload = () => ok(fr.result);
-    fr.onerror = ko;
-    fr.readAsDataURL(blob);
-  });
-}
-
 function renderLogo(mapContainerEl, style, state) {
-  // limpiar anterior
   if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
   if (state.logoResizeObs) { try { state.logoResizeObs.disconnect(); } catch {} state.logoResizeObs = null; }
-
-  // toggle
   if (!style.showLogo) return;
 
-  // 1) data: embebido → prioridad (CSP-safe)
   let src = (style.logoDataUrl || '').trim();
-
-  // 2) si no hay data:, usar URL (Drive thumbnail recomendado). Sin fetch.
   if (!src) {
-    let url = normalizeGcsUrl((style.logoUrl || '').trim());
-    url = toDriveThumbnail(url, style.logoWidthPx || 160);
-    if (!url) return;
-    if (!hostAllowedForImg(url)) {
-      console.warn('[Logo] Host no permitido por CSP. Pegá un data: o usa Drive thumbnail.');
+    const url = (style.logoUrl || '').trim();
+    if (!url || !hostAllowedForImg(url)) {
+      if (!url) return;
+      console.warn('[Logo] Host no permitido por CSP. Usá data: o Drive thumbnail.');
       return;
     }
     src = url;
@@ -814,7 +693,6 @@ function renderLogo(mapContainerEl, style, state) {
   img.draggable = false;
   img.src = src;
 
-  // función local para calcular el ancho final (px o %)
   const computeWidthPx = () => {
     if ((style.logoWidthMode || 'px') === 'percent') {
       const cw = mapContainerEl?.clientWidth || mapContainerEl?.offsetWidth || 800;
@@ -824,16 +702,13 @@ function renderLogo(mapContainerEl, style, state) {
     return Math.max(16, Number(style.logoWidthPx || 160));
   };
 
-  // ⚠️ Garantías anti-deformación
-  img.removeAttribute('width');
-  img.removeAttribute('height');
-
+  img.removeAttribute('width'); img.removeAttribute('height');
   Object.assign(img.style, {
     position: 'absolute',
-    width: computeWidthPx() + 'px',  // solo controlamos el ANCHO
-    height: 'auto',                  // alto automático
-    aspectRatio: 'auto',             // usa la relación natural
-    objectFit: 'contain',            // por si un contenedor fijara alto
+    width: computeWidthPx() + 'px',
+    height: 'auto',
+    aspectRatio: 'auto',
+    objectFit: 'contain',
     opacity: String(Math.max(0, Math.min(1, Number(style.logoOpacity ?? 0.9)))),
     pointerEvents: 'none',
     userSelect: 'none',
@@ -848,13 +723,11 @@ function renderLogo(mapContainerEl, style, state) {
   img.style.left = (pos.endsWith('left') ? pad : '');
   img.style.right = (pos.endsWith('right') ? pad : '');
 
-  // asegurar contenedor posicionado
   const el = mapContainerEl;
   if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
   el.appendChild(img);
   state.logoEl = img;
 
-  // responsive cuando el modo es percent
   if ((style.logoWidthMode || 'px') === 'percent' && 'ResizeObserver' in window) {
     const ro = new ResizeObserver(() => {
       if (!state.logoEl) return;
@@ -866,40 +739,54 @@ function renderLogo(mapContainerEl, style, state) {
 }
 
 /* ============================================================================
-   Leer parámetro de nivel desde datos (param_nivel)
+   Param: leer 'param_nivel' o similares del mensaje
 ============================================================================ */
-function readParamNivelFromMessage(message) {
+function readParamNivelFromMessage(message, dimIdx) {
   try {
-    const hdrs = message?.tables?.DEFAULT?.headers || [];
-    const rows = message?.tables?.DEFAULT?.rows || [];
-    if (!hdrs.length || !rows.length) return null;
-    const names = hdrs.map(h => (h.name ?? h.id ?? '').toString());
-    const ids   = hdrs.map(h => (h.id   ?? '').toString());
-    const row0  = rows[0] || [];
-    let idx = names.findIndex(n => cleanString(n) === 'param_nivel');
-    if (idx < 0) idx = ids.findIndex(id => cleanString(id) === 'param_nivel');
-    if (idx < 0) return null;
-    const raw = row0[idx];
-    const s = String(raw?.v ?? raw?.value ?? raw ?? '').toLowerCase();
-    if (s.includes('comuna')) return 'comuna';
-    if (s.includes('barrio')) return 'barrio';
-    return null;
-  } catch { return null; }
+    const T = message?.tables?.DEFAULT;
+    const H = T?.headers || [];
+    const R = T?.rows || [];
+    if (!H.length || !R.length) return null;
+
+    // 1) Buscar columna que suene a "param_nivel / nivel"
+    let idx = H.findIndex(h => /param.*nivel|^nivel$|jerarquia|barrio.*comuna/i.test((h?.id || h?.name || '')));
+    if (idx >= 0) {
+      const raw = R[0]?.[idx];
+      const s = String(raw?.v ?? raw?.value ?? raw ?? '').toLowerCase();
+      if (s.includes('comuna')) return 'comuna';
+      if (s.includes('barrio')) return 'barrio';
+    }
+
+    // 2) Heurística por nombre de la dimensión seleccionada
+    const f = message?.fieldsByConfigId?.geoDimension?.[0];
+    const n = (f?.name || f?.id || '').toLowerCase();
+    if (n.includes('comuna')) return 'comuna';
+    if (n.includes('barrio')) return 'barrio';
+  } catch {}
+  return null; // no se pudo determinar
 }
 
 /* ============================================================================
    Render principal
 ============================================================================ */
-const __leafletState = { map: null, layer: null, legend: null, logoEl: null };
+const __leafletState = { map: null, layer: null, legend: null, logoEl: null, logoResizeObs: null };
 
 export default function drawVisualization(container, message = {}) {
   container.style.width = '100%';
   container.style.height = '100%';
 
   const style  = readStyle(message);
-  const paramNivel = readParamNivelFromMessage(message);
-  const nivel  = (paramNivel || style.nivelJerarquia || 'barrio');  // ← parámetro tiene prioridad
-  const styleEff = { ...style, nivelJerarquia: nivel };             // ← alinear agregación/lookup al nivel efectivo
+
+  // Resolvemos índices de dimensión/métrica
+  const idx = resolveIndices(message);
+
+  // Nivel: parámetro → estilo → heurística por nombre de dimensión
+  const paramNivel = readParamNivelFromMessage(message, idx.dim);
+  let nivel = paramNivel || style.nivelJerarquia || 'barrio';
+
+  // Elegir GeoJSON por nivel
+  const geojson =
+    (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS : GEOJSON;
 
   if (DEBUG) {
     const s = message?.styleById || message?.style || {};
@@ -908,26 +795,24 @@ export default function drawVisualization(container, message = {}) {
       const val = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
       readable[k] = (val && typeof val === 'object' && 'color' in val) ? val.color : val;
     }
-    console.group('[Style dump]'); console.table(readable); console.log('readStyle():', style, 'nivelEff:', nivel); console.groupEnd();
+    console.group('[Style dump]'); console.table(readable);
+    console.log('nivel (param>estilo):', nivel);
+    console.log('dimIdx:', idx.dim, 'metIdx:', idx.metric);
+    console.groupEnd();
   }
 
-  // usando styleEff para que la resolución de DIM y el lookup sigan el nivel elegido
-  const stats     = buildValueMap(message, styleEff);
-  const rowLookup = buildRowLookup(message, styleEff);
+  // Valor por polígono (SUM met) + lookup por texto
+  const stats     = buildValueMap(message, idx.dim, idx.metric);
+  const rowLookup = buildRowLookup(message, idx.dim);
   const rankCtx   = makeRankCtx(stats?.map?.values?.(), { highIsOne: true });
 
-  // elegir GeoJSON según nivel
-  const geojson =
-    (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS
-    : GEOJSON;
-
-  // categórico auto si valores ∈ {1,2,3}
+  // Categorías automáticas si valores ∈ {1,2,3}
   const uniqVals = new Set();
   for (const v of (stats?.map?.values?.() || [])) { if (Number.isFinite(v)) uniqVals.add(v); }
   const autoCategory = uniqVals.size > 0 && [...uniqVals].every(v => Number.isInteger(v) && v >= 1 && v <= 3);
   const categoryModeActive = !!style.categoryMode || autoCategory;
 
-  // mapa
+  // Leaflet map
   if (!__leafletState.map) {
     __leafletState.map = L.map(container, { zoomControl: true, attributionControl: false });
   } else {
@@ -986,7 +871,7 @@ export default function drawVisualization(container, message = {}) {
       const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
       const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
 
-      // Tooltip (hover) — evitar duplicados
+      // Tooltip (hover)
       if (style.showLabels) {
         const tooltipHtml = renderTemplate(tooltipTpl, nombreLabel, v, rowByName, rankCtx);
         try { lyr.unbindTooltip(); } catch {}
@@ -999,7 +884,7 @@ export default function drawVisualization(container, message = {}) {
   }).addTo(map);
   __leafletState.layer = layer;
 
-  // fit
+  // fit bounds
   try {
     const b = layer.getBounds();
     if (b?.isValid && b.isValid()) {
@@ -1076,18 +961,6 @@ export default function drawVisualization(container, message = {}) {
   renderLogo(map.getContainer(), style, __leafletState);
 
   if (DEBUG) dbg('[Viz] Render OK — features:', geojson?.features?.length || 0);
-}
-
-/* ============================================================================
-   Utilidad de formateo breve
-============================================================================ */
-function fmt(n) {
-  if (!Number.isFinite(n)) return 's/d';
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
-  if (abs >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (abs >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
-  return (Math.round(n * 100) / 100).toString();
 }
 
 /* ============================================================================
@@ -1215,5 +1088,5 @@ function fmt(n) {
     document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
   } else {
     initWrapper().catch(err);
-  }  
+  }
 })();
