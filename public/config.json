@@ -200,9 +200,16 @@
       "label": "Branding",
       "elements": [
         { "id": "showLogo",     "label": "Mostrar logo", "type": "CHECKBOX", "defaultValue": true },
-        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL PNG/SVG)", "type": "TEXTAREA", "defaultValue": "", "helpText": "Pega aquí un data URL (data:image/png;base64,...) para evitar bloqueos CSP. Si está vacío, se usa 'URL del logo'." },
 
-        { "id": "logoUrl",      "label": "URL del logo (https o gs://)", "type": "TEXTINPUT", "defaultValue": "" },
+        { "id": "logoDataUrl",
+          "label": "Logo embebido (data: URL PNG/SVG)",
+          "type": "TEXTINPUT",
+          "defaultValue": "",
+          "helpText": "Pegá un data URL (data:image/png;base64,...) para evitar bloqueos CSP. Si está vacío, se usa 'URL del logo'."
+        },
+
+        { "id": "logoUrl", "label": "URL del logo (https o gs://)", "type": "TEXTINPUT", "defaultValue": "" },
+
         {
           "id": "logoPosition",
           "label": "Posición del logo",
@@ -215,8 +222,7 @@
           ],
           "defaultValue": "bottomleft"
         },
-        { "id": "logoWidthPx",  "label": "Ancho del logo (px)", "type": "NUMBER",  "defaultValue": 160 },
-        { "id": "logoOpacity",  "label": "Opacidad del logo",   "type": "OPACITY", "defaultValue": 0.9 },
+
         {
           "id": "logoWidthMode",
           "label": "Tamaño del logo",
@@ -227,16 +233,17 @@
           ],
           "defaultValue": "px"
         },
-        {
-          "id": "logoWidthPercent",
-          "label": "Ancho (% del lienzo)",
-          "type": "SLIDER",
-          "min": 2,
-          "max": 30,
-          "step": 1,
-          "defaultValue": 10
-        }
+
+        { "id": "logoWidthPx",      "label": "Ancho del logo (px)", "type": "NUMBER",  "defaultValue": 160 },
+
+        { "id": "logoWidthPercent", "label": "Ancho (% del lienzo)", "type": "NUMBER",
+          "defaultValue": 10,
+          "options": { "min": 2, "max": 30, "step": 1 }
+        },
+
+        { "id": "logoOpacity", "label": "Opacidad del logo", "type": "OPACITY", "defaultValue": 0.9 }
       ]
     }
+
   ]
 }
