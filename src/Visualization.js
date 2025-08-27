@@ -616,17 +616,24 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
 
   // Extrae números de una celda que trae "valores, separadas, por comas"
   // Soporta miles con punto y decimales con coma o con punto (ej: "225.970,3,1279")
-  const extractNums = (raw) => {
-    const s = String(raw ?? '');
-    const m = s.match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:\.\d+)?/g) || [];
-    return m.map(toNumberLoose).filter(Number.isFinite);
-  };
-  const getCsvNum = (colKey, idx1) => {
-    const raw = getCol(rowByName, String(colKey).trim());
-    const nums = extractNums(raw);
-    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
-    return nums[i];
-  };
+// Extrae números soportando miles y decimales con punto o coma.
+// e.g. "1,281,1279,677910,3" => [1281, 1279, 677910.3]
+    const extractNums = (raw) => {
+      const s = String(raw ?? '');
+      const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g; // ← clave
+      const m = s.match(rx) || [];
+      return m.map(toNumberLoose).filter(Number.isFinite);
+    };
+
+    // Para texto por “posición” en un CSV, NO cortar comas que son decimales.
+    // Divide en comas que NO están seguidas de dígito (coma no-numérica).
+    const getCsvTxt = (colKey, idx1) => {
+      const raw = getCol(rowByName, String(colKey).trim());
+      const parts = String(raw ?? '').split(/,(?!\d)/).map(s => s.trim());
+      const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
+      return parts[i] ?? '';
+    };
+
   const getCsvTxt = (colKey, idx1) => {
     const raw = getCol(rowByName, String(colKey).trim());
     const parts = String(raw ?? '').split(/\s*,\s*/);
