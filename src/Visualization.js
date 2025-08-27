@@ -1215,5 +1215,5 @@ function fmt(n) {
     document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
   } else {
     initWrapper().catch(err);
-  }
+  } 
 })();
