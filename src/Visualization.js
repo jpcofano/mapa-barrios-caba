@@ -7,6 +7,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
 import geojsonText from './barrioscaba.geojson?raw';
+import geojsonComunasText from './comunascaba.geojson?raw'; // ← nuevo
 
 /* ============================================================================
    DEBUG
@@ -99,9 +100,13 @@ const ensureDsccScript = (() => {
 /* ============================================================================
    GeoJSON
 ============================================================================ */
-let GEOJSON;
+let GEOJSON; // barrios
 try { GEOJSON = JSON.parse(geojsonText); }
-catch (e) { err('[Viz] GeoJSON inválido:', e); GEOJSON = { type: 'FeatureCollection', features: [] }; }
+catch (e) { err('[Viz] GeoJSON barrios inválido:', e); GEOJSON = { type: 'FeatureCollection', features: [] }; }
+
+let GEOJSON_COMUNAS = null; // comunas (nuevo)
+try { GEOJSON_COMUNAS = JSON.parse(geojsonComunasText); }
+catch (e) { warn('[Viz] GeoJSON comunas no disponible o inválido. (Cargá comunascaba.geojson)'); GEOJSON_COMUNAS = null; }
 
 /* ============================================================================
    Helpers texto/color
@@ -241,13 +246,12 @@ function readStyle(message = {}) {
     logoPosition: (s.logoPosition && s.logoPosition.value) || 'bottomleft',
     logoWidthPx: num(s.logoWidthPx, 56),
     logoOpacity: num(s.logoOpacity, 0.9),
-    
-  // modo tamaño en % o px
-  logoWidthMode: (s.logoWidthMode && s.logoWidthMode.value) || 'px',
-  logoWidthPercent: num(s.logoWidthPercent, 10)
+
+    // modo tamaño en % o px
+    logoWidthMode: (s.logoWidthMode && s.logoWidthMode.value) || 'px',
+    logoWidthPercent: num(s.logoWidthPercent, 10)
   };
 }
-
 
 /* ============================================================================
    Nombres de feature
@@ -450,9 +454,6 @@ function resolveIndices(tableLike, style) {
 
   return { idxDim, idxMet };
 }
-
-
-
 
 /* ============================================================================
    Agregado por barrio/comuna: valor para colorear
@@ -720,7 +721,6 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   return out;
 }
 
-
 /* ============================================================================
    Borde auto-contraste + Logo (gs:// → https)
 ============================================================================ */
@@ -858,7 +858,27 @@ function renderLogo(mapContainerEl, style, state) {
   }
 }
 
-
+/* ============================================================================
+   Leer parámetro de nivel desde datos (param_nivel)
+============================================================================ */
+function readParamNivelFromMessage(message) {
+  try {
+    const hdrs = message?.tables?.DEFAULT?.headers || [];
+    const rows = message?.tables?.DEFAULT?.rows || [];
+    if (!hdrs.length || !rows.length) return null;
+    const names = hdrs.map(h => (h.name ?? h.id ?? '').toString());
+    const ids   = hdrs.map(h => (h.id   ?? '').toString());
+    const row0  = rows[0] || [];
+    let idx = names.findIndex(n => cleanString(n) === 'param_nivel');
+    if (idx < 0) idx = ids.findIndex(id => cleanString(id) === 'param_nivel');
+    if (idx < 0) return null;
+    const raw = row0[idx];
+    const s = String(raw?.v ?? raw?.value ?? raw ?? '').toLowerCase();
+    if (s.includes('comuna')) return 'comuna';
+    if (s.includes('barrio')) return 'barrio';
+    return null;
+  } catch { return null; }
+}
 
 /* ============================================================================
    Render principal
@@ -870,7 +890,9 @@ export default function drawVisualization(container, message = {}) {
   container.style.height = '100%';
 
   const style  = readStyle(message);
-  const nivel  = style.nivelJerarquia || 'barrio';
+  const paramNivel = readParamNivelFromMessage(message);
+  const nivel  = (paramNivel || style.nivelJerarquia || 'barrio');  // ← parámetro tiene prioridad
+  const styleEff = { ...style, nivelJerarquia: nivel };             // ← alinear agregación/lookup al nivel efectivo
 
   if (DEBUG) {
     const s = message?.styleById || message?.style || {};
@@ -879,13 +901,18 @@ export default function drawVisualization(container, message = {}) {
       const val = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
       readable[k] = (val && typeof val === 'object' && 'color' in val) ? val.color : val;
     }
-    console.group('[Style dump]'); console.table(readable); console.log('readStyle():', style); console.groupEnd();
+    console.group('[Style dump]'); console.table(readable); console.log('readStyle():', style, 'nivelEff:', nivel); console.groupEnd();
   }
 
-  const stats     = buildValueMap(message, style);
-  const rowLookup = buildRowLookup(message, style);
+  // usando styleEff para que la resolución de DIM y el lookup sigan el nivel elegido
+  const stats     = buildValueMap(message, styleEff);
+  const rowLookup = buildRowLookup(message, styleEff);
   const rankCtx   = makeRankCtx(stats?.map?.values?.(), { highIsOne: true });
-  const geojson   = (typeof GEOJSON !== 'undefined') ? GEOJSON : { type: 'FeatureCollection', features: [] };
+
+  // elegir GeoJSON según nivel
+  const geojson =
+    (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS
+    : GEOJSON;
 
   // categórico auto si valores ∈ {1,2,3}
   const uniqVals = new Set();

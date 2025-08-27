@@ -11,6 +11,13 @@
           "options": { "min": 1, "max": 1 }
         },
         {
+          "id": "param_nivel",
+          "label": "Parámetro Nivel (Barrio/Comuna)",
+          "type": "DIMENSION",
+          "options": { "min": 0, "max": 1 },
+          "helpText": "Vinculá aquí el parámetro 'param_nivel' del informe (valores 'Barrio' o 'Comuna')."
+        },
+        {
           "id": "metricPrimary",
           "label": "Métrica principal (para colorear)",
           "type": "METRIC",
@@ -211,24 +218,24 @@
         { "id": "logoWidthPx",  "label": "Ancho del logo (px)", "type": "NUMBER",  "defaultValue": 160 },
         { "id": "logoOpacity",  "label": "Opacidad del logo",   "type": "OPACITY", "defaultValue": 0.9 },
         {
-        "id": "logoWidthMode",
-        "label": "Tamaño del logo",
-        "type": "SELECT_SINGLE",
-        "options": [
-          { "label": "En píxeles", "value": "px" },
-          { "label": "% del ancho del lienzo", "value": "percent" }
-        ],
-        "defaultValue": "px"
-      },
-      {
-        "id": "logoWidthPercent",
-        "label": "Ancho (% del lienzo)",
-        "type": "SLIDER",
-        "min": 2,
-        "max": 30,
-        "step": 1,
-        "defaultValue": 10
-      }
+          "id": "logoWidthMode",
+          "label": "Tamaño del logo",
+          "type": "SELECT_SINGLE",
+          "options": [
+            { "label": "En píxeles", "value": "px" },
+            { "label": "% del ancho del lienzo", "value": "percent" }
+          ],
+          "defaultValue": "px"
+        },
+        {
+          "id": "logoWidthPercent",
+          "label": "Ancho (% del lienzo)",
+          "type": "SLIDER",
+          "min": 2,
+          "max": 30,
+          "step": 1,
+          "defaultValue": 10
+        }
       ]
     }
   ]
