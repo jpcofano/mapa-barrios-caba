@@ -432,22 +432,20 @@ function resolveIndices(message) {
   const fields = message?.fields || {};
   const R = T?.rows || [];
 
-  // NO tomar columnas del parámetro/jerarquía como dimensión
   const isParamLike = (h) => {
     const s = (h?.name || h?.id || '').toLowerCase();
-    return /(^(param.*)?nivel$|^nivel$|jerarquia|^param_|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
+    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
   };
 
-  // IDs a evitar como MÉTRICA (extras y campos extra de texto)
-  const extrasIds     = (fieldsByCfg.metricExtras || []).map(f => f.id);
-  const extraDimIds   = (fieldsByCfg.extraFields   || []).map(f => f.id); // ← NUEVO
+  const extrasIds   = (fieldsByCfg.metricExtras || []).map(f => f.id);
+  const extraDimIds = (fieldsByCfg.extraFields   || []).map(f => f.id);
 
-  // 1) DIMENSIÓN: la del slot geoDimension
+  // Dimensión: slot geoDimension, si existe
   let dimIdx = -1;
   const geoId = fieldsByCfg.geoDimension?.[0]?.id;
   if (geoId) dimIdx = H.findIndex(h => h.id === geoId);
 
-  // 2) Si no hay slot: buscar Barrio/Comuna/DimUbicacion (excluyendo param-like)
+  // Si no hay, buscar por nombre (evitando param-like)
   if (dimIdx < 0) {
     const candidates = H.map((h,i)=>({i,h})).filter(({h})=>{
       const s = (h?.name || h?.id || '').toLowerCase();
@@ -457,7 +455,7 @@ function resolveIndices(message) {
     if (candidates.length) dimIdx = candidates[0].i;
   }
 
-  // 3) Último recurso: primera columna que NO sea métrica ni param-like
+  // Último recurso: primera no-métrica ni param-like
   if (dimIdx < 0) {
     for (let i = 0; i < H.length; i++) {
       const id = H[i]?.id;
@@ -467,35 +465,38 @@ function resolveIndices(message) {
     }
   }
 
-  // 4) MÉTRICA: la del slot metricPrimary
+  // Métrica: slot metricPrimary
   let metIdx = -1;
   const metId = fieldsByCfg.metricPrimary?.[0]?.id;
   if (metId) metIdx = H.findIndex(h => h.id === metId);
 
-  // 5) Si no hay slot: primera columna con concept=METRIC que NO sea extra
+  // Si no hay, primera MÉTRIC que no sea extra/extraDim
   if (metIdx < 0) {
     for (let i = 0; i < H.length; i++) {
       const id = H[i]?.id;
-      if (fields[id]?.concept === 'METRIC' && !extrasIds.includes(id) && !extraDimIds.includes(id)) {
+      if (fields[id]?.concept === 'METRIC') {
+        if (extrasIds.includes(id) || extraDimIds.includes(id)) continue;
         metIdx = i; break;
       }
     }
   }
 
-  // 6) Último recurso: primera numérica (que no sea dim ni extras)
+  // Último recurso: primera numérica que no sea dim ni extras
   if (metIdx < 0 && H.length) {
     for (let i = 0; i < H.length; i++) {
       if (i === dimIdx) continue;
       const id = H[i]?.id;
-      if (extrasIds.includes(id) || extraDimIds.includes(id)) continue; // ← NUEVO
-      const v = R?.[0]?.[i];
-      const num = toNumberLoose((v && typeof v === 'object' && 'v' in v) ? v.v : v);
+      if (extrasIds.includes(id) || extraDimIds.includes(id)) continue;
+      let v = R?.[0]?.[i];
+      if (v && typeof v === 'object' && 'v' in v) v = v.v;
+      const num = Number.parseFloat(v);
       if (Number.isFinite(num)) { metIdx = i; break; }
     }
   }
 
   return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
 }
+
 
 
 /* ============================================================================
@@ -854,6 +855,31 @@ function readParamNivelFromMessage(message, dimIdx) {
   } catch {}
   return null; // no se pudo determinar
 }
+// Busca en headers/rows una columna que luzca como "nivel"/"jerarquía"/"barrio-comuna"
+// y devuelve 'barrio' | 'comuna' si la encuentra; si no, null.
+function extractParamNivelFromRows(headers, rows) {
+  if (!headers || !headers.length || !rows || !rows.length) return null;
+
+  // Candidatos por id o nombre
+  const matchNivel = (h) => {
+    const s = (h?.name || h?.id || '').toLowerCase();
+    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
+  };
+
+  // Encontrar índice candidato (el primero que calce)
+  let idx = headers.findIndex(matchNivel);
+  if (idx < 0) return null;
+
+  // Tomar el primer valor no vacío
+  for (const row of rows) {
+    let cell = row?.[idx];
+    if (cell && typeof cell === 'object' && 'v' in cell) cell = cell.v;
+    const val = ('' + (cell ?? '')).trim().toLowerCase();
+    if (val === 'barrio' || val === 'comuna') return val;
+  }
+
+  return null;
+}
 
 /* ============================================================================
    Render principal
@@ -1085,13 +1111,25 @@ export default function drawVisualization(container, message = {}) {
 
       const norm = normalizeDEFAULTTable(data);
       const { headers, rows } = toHeadersRows(norm);
-      const incomingStyle = data.styleById || data.style || {};
+
+      // ← NUEVO: priorizar el nivel que venga en las filas (param) por sobre el estilo
+      const incomingStyle  = data.styleById || data.style || {};
+      const nivelFromRows  = extractParamNivelFromRows(headers, rows);
+      const overrideStyle  = { ...incomingStyle };
+      if (nivelFromRows) {
+        // Forzamos el estilo para que drawVisualization elija el GeoJSON correcto
+        overrideStyle.nivelJerarquia = { value: nivelFromRows };
+        if (DEBUG) console.log('[nivel desde filas]', nivelFromRows);
+      }
+
       const tableLike = {
         fields: data.fields || {},
         tables: { DEFAULT: { headers, rows } },
         fieldsByConfigId: data.fieldsByConfigId || {},
-        styleById: incomingStyle || {}
+        // ← usar el estilo override (param > estilo)
+        styleById: overrideStyle
       };
+
 
       drawVisualization(ensureContainer(), tableLike);
       if (DEBUG) { console.groupEnd(); }
