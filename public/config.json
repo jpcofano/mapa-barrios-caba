@@ -14,7 +14,8 @@
           "id": "param_nivel",
           "label": "Parámetro Nivel (Barrio/Comuna)",
           "type": "DIMENSION",
-          "options": { "min": 0, "max": 1 }
+          "options": { "min": 0, "max": 1 },
+          "helpText": "Vinculá aquí un campo calculado espejo del parámetro (p.ej. \"Nivel = param_nivel\"). No lo uses como dimensión principal."
         },
         {
           "id": "metricPrimary",
@@ -44,7 +45,7 @@
       "elements": [
         {
           "id": "nivelJerarquia",
-          "label": "Nivel",
+          "label": "Nivel (fallback si no llega \"Nivel/param_nivel\")",
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Barrio", "value": "barrio" },
@@ -69,78 +70,58 @@
           "label": "Escala base",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Verde → Rojo",     "value": "greenToRed" },
-            { "label": "Azul → Amarillo",  "value": "blueToYellow" },
-            { "label": "Grises",           "value": "grayscale" },
-            { "label": "Amarillos",        "value": "yellow" }
+            { "label": "Verde → Rojo", "value": "greenToRed" },
+            { "label": "Azul → Amarillo", "value": "blueToYellow" },
+            { "label": "Grises", "value": "grayscale" },
+            { "label": "Amarillos", "value": "yellow" }
           ],
           "defaultValue": "greenToRed"
         },
-        {
-          "id": "invertScale",
-          "label": "Invertir escala",
-          "type": "CHECKBOX",
-          "defaultValue": false
-        },
+        { "id": "invertScale", "label": "Invertir escala", "type": "CHECKBOX", "defaultValue": false },
         {
           "id": "colorPalette",
           "label": "Paleta (moderna)",
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Ninguna (usar escala base)", "value": "" },
-            { "label": "viridis",   "value": "viridis" },
-            { "label": "magma",     "value": "magma" },
-            { "label": "plasma",    "value": "plasma" },
-            { "label": "cividis",   "value": "cividis" },
-            { "label": "turbo",     "value": "turbo" },
-            { "label": "Spectral",  "value": "Spectral" },
-            { "label": "Rojos",     "value": "reds" },
-            { "label": "Verdes",    "value": "greens" },
-            { "label": "Azules",    "value": "blues" },
-            { "label": "Violetas",  "value": "purples" },
-            { "label": "Naranjas",  "value": "oranges" },
-            { "label": "soloAmarillo",  "value": "soloAmarillo" },
-            { "label": "coolToYellow",  "value": "coolToYellow" }
+            { "label": "viridis", "value": "viridis" },
+            { "label": "magma", "value": "magma" },
+            { "label": "plasma", "value": "plasma" },
+            { "label": "cividis", "value": "cividis" },
+            { "label": "turbo", "value": "turbo" },
+            { "label": "Spectral", "value": "Spectral" },
+            { "label": "Rojos", "value": "reds" },
+            { "label": "Verdes", "value": "greens" },
+            { "label": "Azules", "value": "blues" },
+            { "label": "Violetas", "value": "purples" },
+            { "label": "Naranjas", "value": "oranges" },
+            { "label": "soloAmarillo", "value": "soloAmarillo" },
+            { "label": "coolToYellow", "value": "coolToYellow" }
           ],
           "defaultValue": ""
         },
-        {
-          "id": "customPalette",
-          "label": "Paleta personalizada (#hex,#hex,...)",
-          "type": "TEXTINPUT",
-          "defaultValue": ""
-        },
-        {
-          "id": "opacity",
-          "label": "Opacidad del relleno",
-          "type": "OPACITY",
-          "defaultValue": 0.5
-        },
-        {
-          "id": "colorMissing",
-          "label": "Color para valores faltantes",
-          "type": "FILL_COLOR",
-          "defaultValue": "#D9D9D9"
-        }
+        { "id": "customPalette", "label": "Paleta personalizada (#hex,#hex,...)", "type": "TEXTINPUT", "defaultValue": "" },
+        { "id": "opacity", "label": "Opacidad del relleno", "type": "OPACITY", "defaultValue": 0.5 },
+        { "id": "colorMissing", "label": "Color para valores faltantes", "type": "FILL_COLOR", "defaultValue": "#D9D9D9" }
       ]
     },
     {
       "id": "categories",
       "label": "Colores por categorías (1/2/3)",
       "elements": [
-        { "id": "categoryMode",   "label": "Activar modo categórico", "type": "CHECKBOX", "defaultValue": false },
+        { "id": "categoryMode", "label": "Activar modo categórico", "type": "CHECKBOX", "defaultValue": false },
 
         { "id": "category1Label", "label": "Etiqueta Cat. 1", "type": "TEXTINPUT", "defaultValue": "Categoría 1" },
-        { "id": "category1Value", "label": "Valor Cat. 1",    "type": "NUMBER",    "defaultValue": 1 },
-        { "id": "category1Color", "label": "Color Cat. 1",    "type": "FILL_COLOR","defaultValue": "#F4B400" },
+        { "id": "category1Value", "label": "Valor Cat. 1", "type": "TEXTINPUT", "defaultValue": "1" },
+        { "id": "category1Color", "label": "Color Cat. 1", "type": "FILL_COLOR", "defaultValue": "#F4B400" },
 
         { "id": "category2Label", "label": "Etiqueta Cat. 2", "type": "TEXTINPUT", "defaultValue": "Categoría 2" },
-        { "id": "category2Value", "label": "Valor Cat. 2",    "type": "NUMBER",    "defaultValue": 2 },
-        { "id": "category2Color", "label": "Color Cat. 2",    "type": "FILL_COLOR","defaultValue": "#3F51B5" },
+        { "id": "category2Value", "label": "Valor Cat. 2", "type": "TEXTINPUT", "defaultValue": "2" },
+        { "id": "category2Color", "label": "Color Cat. 2", "type": "FILL_COLOR", "defaultValue": "#3F51B5" },
 
         { "id": "category3Label", "label": "Etiqueta Cat. 3", "type": "TEXTINPUT", "defaultValue": "Categoría 3" },
-        { "id": "category3Value", "label": "Valor Cat. 3",    "type": "NUMBER",    "defaultValue": 3 },
-        { "id": "category3Color", "label": "Color Cat. 3",    "type": "FILL_COLOR","defaultValue": "#00ACC1" },
+        { "id": "category3Value", "label": "Valor Cat. 3", "type": "TEXTINPUT", "defaultValue": "3" },
+        { "id": "category3Color", "label": "Color Cat. 3", "type": "FILL_COLOR", "defaultValue": "#00ACC1" },
 
         { "id": "categoryOtherColor", "label": "Color \"Otros\"", "type": "FILL_COLOR", "defaultValue": "#E0E0E0" }
       ]
@@ -149,74 +130,59 @@
       "id": "borders",
       "label": "Bordes",
       "elements": [
-        { "id": "showBorders",   "label": "Mostrar bordes",         "type": "CHECKBOX", "defaultValue": true },
-        { "id": "borderColor",   "label": "Color del borde",        "type": "FILL_COLOR","defaultValue": "#9E9E9E" },
-        { "id": "borderWidth",   "label": "Grosor del borde (px)",  "type": "NUMBER",   "defaultValue": 1 },
-        { "id": "borderOpacity", "label": "Opacidad del borde",     "type": "OPACITY",  "defaultValue": 1 }
+        { "id": "showBorders", "label": "Mostrar bordes", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "borderColor", "label": "Color del borde", "type": "FILL_COLOR", "defaultValue": "#9E9E9E" },
+        { "id": "borderWidth", "label": "Grosor del borde (px)", "type": "TEXTINPUT", "defaultValue": "1" },
+        { "id": "borderOpacity", "label": "Opacidad del borde", "type": "OPACITY", "defaultValue": 1 }
       ]
     },
     {
       "id": "legend",
       "label": "Leyenda y etiquetas",
       "elements": [
-        { "id": "showLegend",     "label": "Mostrar leyenda",                "type": "CHECKBOX", "defaultValue": true },
-        { "id": "legendPosition", "label": "Posición de la leyenda",         "type": "SELECT_SINGLE",
+        { "id": "showLegend", "label": "Mostrar leyenda", "type": "CHECKBOX", "defaultValue": true },
+        {
+          "id": "legendPosition",
+          "label": "Posición de la leyenda",
+          "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Abajo derecha",   "value": "bottomright" },
+            { "label": "Abajo derecha", "value": "bottomright" },
             { "label": "Abajo izquierda", "value": "bottomleft" },
-            { "label": "Arriba derecha",  "value": "topright" },
-            { "label": "Arriba izquierda","value": "topleft" }
+            { "label": "Arriba derecha", "value": "topright" },
+            { "label": "Arriba izquierda", "value": "topleft" }
           ],
           "defaultValue": "bottomright"
         },
-        { "id": "showLabels",     "label": "Mostrar tooltip (hover)", "type": "CHECKBOX", "defaultValue": false }
+        { "id": "showLabels", "label": "Mostrar tooltip (hover)", "type": "CHECKBOX", "defaultValue": false }
       ]
     },
     {
       "id": "popup",
       "label": "Popup / Tooltip",
       "elements": [
-        {
-          "id": "popupFormat",
-          "label": "Formato del popup (click)",
-          "type": "TEXTINPUT",
-          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
-        },
-        {
-          "id": "tooltipFormat",
-          "label": "Formato del tooltip (hover) — vacío = usa popup",
-          "type": "TEXTINPUT",
-          "defaultValue": ""
-        }
+        { "id": "popupFormat", "label": "Formato del popup (click)", "type": "TEXTINPUT", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" },
+        { "id": "tooltipFormat", "label": "Formato del tooltip (hover) — vacío = usa popup", "type": "TEXTINPUT", "defaultValue": "" }
       ]
     },
     {
       "id": "branding",
       "label": "Branding",
       "elements": [
-        { "id": "showLogo",     "label": "Mostrar logo", "type": "CHECKBOX", "defaultValue": true },
-
-        { "id": "logoDataUrl",
-          "label": "Logo embebido (data: URL PNG/SVG)",
-          "type": "TEXTINPUT",
-          "defaultValue": ""
-        },
-
-        { "id": "logoUrl",      "label": "URL del logo (https/Drive)", "type": "TEXTINPUT", "defaultValue": "" },
-
+        { "id": "showLogo", "label": "Mostrar logo", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "logoDataUrl", "label": "Logo embebido (data: URL PNG/SVG)", "type": "TEXTINPUT", "defaultValue": "" },
+        { "id": "logoUrl", "label": "URL del logo (https/Drive)", "type": "TEXTINPUT", "defaultValue": "" },
         {
           "id": "logoPosition",
           "label": "Posición del logo",
           "type": "SELECT_SINGLE",
           "options": [
             { "label": "Abajo izquierda", "value": "bottomleft" },
-            { "label": "Abajo derecha",   "value": "bottomright" },
-            { "label": "Arriba izquierda","value": "topleft" },
-            { "label": "Arriba derecha",  "value": "topright" }
+            { "label": "Abajo derecha", "value": "bottomright" },
+            { "label": "Arriba izquierda", "value": "topleft" },
+            { "label": "Arriba derecha", "value": "topright" }
           ],
           "defaultValue": "bottomleft"
         },
-
         {
           "id": "logoWidthMode",
           "label": "Tamaño del logo",
@@ -227,17 +193,10 @@
           ],
           "defaultValue": "px"
         },
-
-        { "id": "logoWidthPx",      "label": "Ancho del logo (px)", "type": "NUMBER",  "defaultValue": 160 },
-
-        { "id": "logoWidthPercent", "label": "Ancho (% del lienzo)", "type": "NUMBER",
-          "defaultValue": 10,
-          "options": { "min": 2, "max": 30, "step": 1 }
-        },
-
-        { "id": "logoOpacity",  "label": "Opacidad del logo", "type": "OPACITY", "defaultValue": 0.9 }
+        { "id": "logoWidthPx", "label": "Ancho del logo (px)", "type": "TEXTINPUT", "defaultValue": "160" },
+        { "id": "logoWidthPercent", "label": "Ancho (% del lienzo)", "type": "TEXTINPUT", "defaultValue": "10" },
+        { "id": "logoOpacity", "label": "Opacidad del logo", "type": "OPACITY", "defaultValue": 0.9 }
       ]
     }
   ]
 }
-  
