@@ -68,6 +68,68 @@ function inferNivelFromDimensionValues(headers, rows, dimIdxGuess = 0) {
   return 'barrio';
 }
 
+// Elige separador si el campo viene con ; o |
+function pickDelimiter(s) {
+  const str = String(s ?? '');
+  if (str.includes('|')) return '|';
+  if (str.includes(';')) return ';';
+  return ','; // por defecto
+}
+
+// Split "inteligente": respeta comillas y NO corta comas entre dígitos (decimales/miles)
+function splitCsvSmart(raw, delim = ',') {
+  if (raw == null) return [];
+  const s = String(raw);
+
+  // Si hay comillas, hacemos un split char a char
+  let out = [];
+  let buf = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    // toggle de comillas
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      buf += ch;
+      continue;
+    }
+
+    // ¿delimitador?
+    if (ch === delim && !inQuotes) {
+      // caso especial para coma decimal/miles: , entre dígitos
+      if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
+        // NO cortar: es parte del número (p.ej. 1,23 o 1,234)
+        buf += ch;
+      } else {
+        out.push(buf.trim().replace(/^"(.*)"$/,'$1')); // quita comillas externas
+        buf = '';
+      }
+      continue;
+    }
+
+    buf += ch;
+  }
+  out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
+  return out;
+}
+
+// Extrae números de un trozo de texto respetando formatos comunes
+function extractNumbers(raw) {
+  const s = String(raw ?? '');
+  const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
+  const m = s.match(rx) || [];
+  const toNumberLoose = (val) => {
+    let t = String(val).replace(/\s|\u00A0/g,'').trim();
+    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g,'').replace(',', '.'); // 1.234,56 → 1234.56
+    else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g,'');               // 1,234.56 → 1234.56
+    else t = t.replace(',', '.');                                                          // 12,3 → 12.3
+    const n = Number(t);
+    return Number.isFinite(n) ? n : NaN;
+  };
+  return m.map(toNumberLoose).filter(Number.isFinite);
+}
 
 /* ============================================================================
    DEBUG
@@ -698,26 +760,75 @@ function makeRankCtx(mapValues, opts = { highIsOne: true }) {
 function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
 
-  // CSV helpers
+  // --- CSV helpers robustos (adentro para no tocar el resto del archivo) ---
   const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
-  const getCsvTxt = (colKey, idx1) => {
-    const raw = getColVal(rowByName, colKey);
-    const parts = String(raw ?? '').split(/,(?!\d)/).map(s => s.trim()); // no corta comas decimales
-    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
-    return parts[i] ?? '';
+
+  const pickDelimiter = (s) => {
+    const str = String(s ?? '');
+    if (str.includes('|')) return '|';
+    if (str.includes(';')) return ';';
+    return ','; // default
   };
-  const extractNums = (raw) => {
+
+  // Split que respeta comillas y NO corta comas decimales/miles
+  const splitCsvSmart = (raw, delim = ',') => {
+    if (raw == null) return [];
+    const s = String(raw);
+    const out = [];
+    let buf = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+
+      if (ch === '"') { inQuotes = !inQuotes; buf += ch; continue; }
+
+      if (ch === delim && !inQuotes) {
+        // Evitar cortar "1,23" o "1,234" cuando el delim es coma
+        if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
+          buf += ch;
+        } else {
+          out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
+          buf = '';
+        }
+        continue;
+      }
+
+      buf += ch;
+    }
+    out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
+    return out;
+  };
+
+  const extractNumbers = (raw) => {
     const s = String(raw ?? '');
     const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
     const m = s.match(rx) || [];
+    // usa toNumberLoose global
     return m.map(toNumberLoose).filter(Number.isFinite);
   };
-  const getCsvNum = (colKey, idx1) => {
+
+  const getCsvParts = (colKey) => {
     const raw = getColVal(rowByName, colKey);
-    const nums = extractNums(raw);
-    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
-    return nums[i];
+    const delim = pickDelimiter(raw);
+    return splitCsvSmart(raw, delim);
   };
+
+  // Texto por índice (1-based)
+  const getCsvTxt = (colKey, idx1) => {
+    const parts = getCsvParts(colKey);
+    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
+    return parts[i] ?? '';
+  };
+
+  // Número por índice (1-based)
+  const getCsvNum = (colKey, idx1) => {
+    const piece = getCsvTxt(colKey, idx1);
+    const nums = extractNumbers(piece);
+    return nums.length ? nums[0] : NaN;
+  };
+
+  // -------------------------------------------------------------------------
 
   let out = String(tpl || '');
 
@@ -797,6 +908,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
 
   return out;
 }
+
 
 /* ============================================================================
    Borde auto-contraste + Logo
@@ -953,9 +1065,23 @@ export default function drawVisualization(container, message = {}) {
   }
 
   // Valor por polígono (SUM met) + lookup por texto — ambas usando clave CANÓNICA según nivel
-  const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
-  const rowLookup = buildRowLookup(message, idx.dim, nivel);
-  const rankCtx   = makeRankCtx(stats?.map?.values?.(), { highIsOne: true });
+const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
+const rowLookup = buildRowLookup(message, idx.dim, nivel);
+
+// rank solo con lo que REALMENTE se pinta (claves que matchean features del geojson activo)
+const paintedVals = [];
+for (const f of (geojson?.features || [])) {
+  const key = getFeatureKey(f, nivel, style.geojsonProperty);
+  const val = stats.map.get(key);
+  if (Number.isFinite(val)) paintedVals.push(val);
+}
+const rankCtx = makeRankCtx(paintedVals, { highIsOne: true });
+
+// (opcional) debug rápido
+if (DEBUG) {
+  console.log('[rank] mapSize:', stats.map.size, 'painted:', paintedVals.length);
+}
+
 
   // Categorías automáticas si valores ∈ {1,2,3}
   const uniqVals = new Set();
