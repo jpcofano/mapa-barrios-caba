@@ -10,6 +10,64 @@ import './Visualization.css';
 // GeoJSON (Barrio + Comuna)
 import geojsonBarriosText  from './barrioscaba.geojson?raw';
 import geojsonComunasText  from './comunascaba.geojson?raw';  // ← asegurate de tener este archivo
+// Ya lo tenías (por si no):
+function extractParamNivelFromRows(headers, rows) {
+  if (!headers?.length || !rows?.length) return null;
+  const looksLikeNivel = (h) => {
+    const s = (h?.name || h?.id || '').toLowerCase();
+    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
+  };
+  const idx = headers.findIndex(looksLikeNivel);
+  if (idx < 0) return null;
+
+  for (const r of rows) {
+    let v = r?.[idx];
+    if (v && typeof v === 'object' && 'v' in v) v = v.v;
+    const s = String(v ?? '').trim().toLowerCase();
+    if (s.includes('comuna')) return 'comuna';
+    if (s.includes('barrio')) return 'barrio';
+  }
+  return null;
+}
+
+// NUEVO: infiere "comuna" o "barrio" mirando los VALORES de la dimensión geográfica
+function inferNivelFromDimensionValues(headers, rows, dimIdxGuess = 0) {
+  if (!headers?.length || !rows?.length) return null;
+
+  // Intentá ubicar la columna de dimensión “oficial” (slot geoDimension) o una que suene a barrio/comuna
+  let i = dimIdxGuess;
+  if (i == null || i < 0 || i >= headers.length) {
+    i = headers.findIndex(h => /\bdimubicacion\b|\bubicacion\b|\bbarrio\b|\bcomuna\b/i.test((h?.name||h?.id||'')));
+    if (i < 0) i = 0;
+  }
+
+  // Tomamos hasta 20 muestras
+  const sample = rows.slice(0, 20).map(r => {
+    let v = r?.[i]; if (v && typeof v === 'object' && 'v' in v) v = v.v;
+    return String(v ?? '').trim().toLowerCase();
+  }).filter(Boolean);
+
+  if (!sample.length) return null;
+
+  // Si la mayoría contiene “comuna”, es comuna
+  const comunaHits = sample.filter(s => /(^|\s)comuna(\s|$)/.test(s)).length;
+  if (comunaHits >= Math.ceil(sample.length * 0.5)) return 'comuna';
+
+  // Si la mayoría son números chicos (1..15), consideralo comuna
+  const numeric = sample.map(s => {
+    const m = s.match(/\d+/);
+    return m ? parseInt(m[0], 10) : NaN;
+  }).filter(Number.isFinite);
+  if (numeric.length >= Math.ceil(sample.length * 0.5)) {
+    const max = Math.max(...numeric);
+    const min = Math.min(...numeric);
+    if (min >= 1 && max <= 15) return 'comuna';
+  }
+
+  // Si no, asumí barrio
+  return 'barrio';
+}
+
 
 /* ============================================================================
    DEBUG
@@ -857,29 +915,7 @@ function readParamNivelFromMessage(message, dimIdx) {
 }
 // Busca en headers/rows una columna que luzca como "nivel"/"jerarquía"/"barrio-comuna"
 // y devuelve 'barrio' | 'comuna' si la encuentra; si no, null.
-function extractParamNivelFromRows(headers, rows) {
-  if (!headers || !headers.length || !rows || !rows.length) return null;
 
-  // Candidatos por id o nombre
-  const matchNivel = (h) => {
-    const s = (h?.name || h?.id || '').toLowerCase();
-    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
-  };
-
-  // Encontrar índice candidato (el primero que calce)
-  let idx = headers.findIndex(matchNivel);
-  if (idx < 0) return null;
-
-  // Tomar el primer valor no vacío
-  for (const row of rows) {
-    let cell = row?.[idx];
-    if (cell && typeof cell === 'object' && 'v' in cell) cell = cell.v;
-    const val = ('' + (cell ?? '')).trim().toLowerCase();
-    if (val === 'barrio' || val === 'comuna') return val;
-  }
-
-  return null;
-}
 
 /* ============================================================================
    Render principal
@@ -1109,26 +1145,38 @@ export default function drawVisualization(container, message = {}) {
         } else { console.warn('DEFAULT sin filas'); }
       }
 
-      const norm = normalizeDEFAULTTable(data);
-      const { headers, rows } = toHeadersRows(norm);
+    const norm = normalizeDEFAULTTable(data);
+    const { headers, rows } = toHeadersRows(norm);
 
-      // ← NUEVO: priorizar el nivel que venga en las filas (param) por sobre el estilo
-      const incomingStyle  = data.styleById || data.style || {};
-      const nivelFromRows  = extractParamNivelFromRows(headers, rows);
-      const overrideStyle  = { ...incomingStyle };
-      if (nivelFromRows) {
-        // Forzamos el estilo para que drawVisualization elija el GeoJSON correcto
-        overrideStyle.nivelJerarquia = { value: nivelFromRows };
-        if (DEBUG) console.log('[nivel desde filas]', nivelFromRows);
-      }
+    // 1) Tomar el estilo entrante
+    const incomingStyle = data.styleById || data.style || {};
+    const overrideStyle = { ...incomingStyle };
 
-      const tableLike = {
-        fields: data.fields || {},
-        tables: { DEFAULT: { headers, rows } },
-        fieldsByConfigId: data.fieldsByConfigId || {},
-        // ← usar el estilo override (param > estilo)
-        styleById: overrideStyle
-      };
+    // 2) Intentar leer el NIVEL desde FILAS (parámetro como columna extra)
+    const nivelFromRows = extractParamNivelFromRows(headers, rows);
+
+    // 3) Si no llegó el parámetro, inferirlo mirando la DIMENSIÓN geográfica
+    let dimIdxGuess = 0;
+    const gId = data?.fieldsByConfigId?.geoDimension?.[0]?.id;
+    if (gId) {
+      const idx = headers.findIndex(h => h?.id === gId);
+      if (idx >= 0) dimIdxGuess = idx;
+    }
+    const nivelFromDim = nivelFromRows ? null : inferNivelFromDimensionValues(headers, rows, dimIdxGuess);
+
+    // 4) Si encontramos algo, forzamos nivelJerarquia en el estilo (param > inferencia > estilo)
+    const chosenNivel = nivelFromRows || nivelFromDim || (incomingStyle?.nivelJerarquia?.value) || 'barrio';
+    overrideStyle.nivelJerarquia = { value: chosenNivel };
+    if (DEBUG) console.log('[nivel efectivo] (param>infer>estilo):', chosenNivel);
+
+    // 5) Armar el payload normalizado para drawVisualization
+    const tableLike = {
+      fields: data.fields || {},
+      tables: { DEFAULT: { headers, rows } },
+      fieldsByConfigId: data.fieldsByConfigId || {},
+      styleById: overrideStyle
+    };
+
 
 
       drawVisualization(ensureContainer(), tableLike);
