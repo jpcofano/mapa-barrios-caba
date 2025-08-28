@@ -432,18 +432,22 @@ function resolveIndices(message) {
   const fields = message?.fields || {};
   const R = T?.rows || [];
 
-  // Columnas que NO deben ser tomadas como dimensión geográfica (param, jerarquía, etc.)
+  // NO tomar columnas del parámetro/jerarquía como dimensión
   const isParamLike = (h) => {
     const s = (h?.name || h?.id || '').toLowerCase();
     return /(^(param.*)?nivel$|^nivel$|jerarquia|^param_|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
   };
 
-  // 1) DIMENSIÓN: preferir la que el usuario puso en el slot geoDimension
+  // IDs a evitar como MÉTRICA (extras y campos extra de texto)
+  const extrasIds     = (fieldsByCfg.metricExtras || []).map(f => f.id);
+  const extraDimIds   = (fieldsByCfg.extraFields   || []).map(f => f.id); // ← NUEVO
+
+  // 1) DIMENSIÓN: la del slot geoDimension
   let dimIdx = -1;
   const geoId = fieldsByCfg.geoDimension?.[0]?.id;
   if (geoId) dimIdx = H.findIndex(h => h.id === geoId);
 
-  // 2) Si no hay slot, buscar por nombre (Barrio/Comuna/DimUbicacion), EXCLUYENDO param-like
+  // 2) Si no hay slot: buscar Barrio/Comuna/DimUbicacion (excluyendo param-like)
   if (dimIdx < 0) {
     const candidates = H.map((h,i)=>({i,h})).filter(({h})=>{
       const s = (h?.name || h?.id || '').toLowerCase();
@@ -463,26 +467,27 @@ function resolveIndices(message) {
     }
   }
 
-  // 4) MÉTRICA: preferir la del slot metricPrimary
+  // 4) MÉTRICA: la del slot metricPrimary
   let metIdx = -1;
   const metId = fieldsByCfg.metricPrimary?.[0]?.id;
   if (metId) metIdx = H.findIndex(h => h.id === metId);
 
-  // 5) Si no hay slot, primera columna marcada como METRIC, EXCLUYENDO metricExtras
-  const extrasIds = (fieldsByCfg.metricExtras || []).map(f => f.id);
+  // 5) Si no hay slot: primera columna con concept=METRIC que NO sea extra
   if (metIdx < 0) {
     for (let i = 0; i < H.length; i++) {
       const id = H[i]?.id;
-      if (fields[id]?.concept === 'METRIC' && !extrasIds.includes(id)) { metIdx = i; break; }
+      if (fields[id]?.concept === 'METRIC' && !extrasIds.includes(id) && !extraDimIds.includes(id)) {
+        metIdx = i; break;
+      }
     }
   }
 
-  // 6) Último recurso: primera columna numérica que no sea la dimensión ni extras
+  // 6) Último recurso: primera numérica (que no sea dim ni extras)
   if (metIdx < 0 && H.length) {
     for (let i = 0; i < H.length; i++) {
       if (i === dimIdx) continue;
       const id = H[i]?.id;
-      if (extrasIds.includes(id)) continue;
+      if (extrasIds.includes(id) || extraDimIds.includes(id)) continue; // ← NUEVO
       const v = R?.[0]?.[i];
       const num = toNumberLoose((v && typeof v === 'object' && 'v' in v) ? v.v : v);
       if (Number.isFinite(num)) { metIdx = i; break; }
@@ -491,6 +496,7 @@ function resolveIndices(message) {
 
   return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
 }
+
 
 /* ============================================================================
    Agregado por clave (barrio/comuna) — usa clave CANÓNICA según nivel
@@ -1172,3 +1178,20 @@ export default function drawVisualization(container, message = {}) {
   }  
 })();
 
+try {
+  window.__viz = Object.assign(window.__viz || {}, {
+    resolveIndices,
+    geoState() {
+      const raw   = window.__dsccLast?.raw;
+      const style = raw?.styleById || {};
+      const styleNivel = style.nivelJerarquia?.value || 'barrio';
+      // Si querés, podés replicar aquí la misma lógica que en drawVisualization
+      return {
+        nivel: styleNivel, // (si usás readParamNivelFromMessage, podés evaluarlo también)
+        hasComunas: !!(GEOJSON_COMUNAS && GEOJSON_COMUNAS.features),
+        comunasCount: (GEOJSON_COMUNAS?.features?.length || 0),
+        barriosCount: (GEOJSON?.features?.length || 0)
+      };
+    }
+  });
+} catch {}
