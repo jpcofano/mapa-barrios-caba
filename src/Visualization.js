@@ -100,6 +100,41 @@ const ensureDsccScript = (() => {
 })();
 
 /* ============================================================================
+   Nivel por parámetro → estilo → heurística
+============================================================================ */
+function pickNivel(msg) {
+  // 1) Estilo (fallback)
+  const style = (msg.styleById || {});
+  const styleNivel = style.nivelJerarquia?.value || 'barrio';
+
+  // 2) Intentar leer valor del parámetro desde las filas (si existen)
+  const T = msg.tables?.DEFAULT || {};
+  const H = T.headers || [];
+  const R = T.rows || [];
+  let paramVal = null;
+  if (R?.length && H?.length) {
+    const pIdx = H.findIndex(h => /(^(param.*)?nivel$|^nivel$|jerarquia|barrio.*comuna)/i
+      .test((h?.id || h?.name || '')));
+    if (pIdx >= 0) {
+      const v = R[0][pIdx];
+      paramVal = (v && typeof v === 'object' && 'v' in v) ? v.v : v;
+    }
+  }
+  const byParam = (paramVal || '').toString().toLowerCase();
+  if (byParam.includes('comuna')) return 'comuna';
+  if (byParam.includes('barrio')) return 'barrio';
+
+  // 3) Si no hay filas, inferir por el NOMBRE de la dimensión geográfica usada
+  const dimName = (msg.fieldsByConfigId?.geoDimension?.[0]?.name ||
+                   msg.fieldsByConfigId?.geoDimension?.[0]?.id || '').toLowerCase();
+  if (dimName.includes('comuna')) return 'comuna';
+  if (dimName.includes('barrio')) return 'barrio';
+
+  // 4) Fallback final: estilo
+  return styleNivel;
+}
+
+/* ============================================================================
    GeoJSON
 ============================================================================ */
 let GEOJSON; // barrios
@@ -111,7 +146,7 @@ try { GEOJSON_COMUNAS = JSON.parse(geojsonComunasText); }
 catch (e) { warn('[Viz] GeoJSON comunas no disponible o inválido. (Cargá comunascaba.geojson)'); GEOJSON_COMUNAS = null; }
 
 /* ============================================================================
-   Helpers texto/color/num
+   Helpers texto/color/num + CANON CLAVES (← importante para COMUNAS)
 ============================================================================ */
 function cleanString(s) {
   return String(s ?? '')
@@ -120,6 +155,21 @@ function cleanString(s) {
     .replace(/\s+/g, ' ').trim().toLowerCase();
 }
 const normalizeKey = (s) => cleanString(s);
+
+// Canon para que “Comuna 1”, “01”, “C1”, “1” → "1"
+function canonComunaKey(s) {
+  const t = cleanString(s).replace(/\s+/g,' ');
+  const m = t.match(/\d+/);
+  if (m) return String(parseInt(m[0],10)); // "01" → "1"
+  return t.replace(/\bcomuna\b/g,'').trim() || t;
+}
+function canonBarrioKey(s) {
+  return cleanString(s);
+}
+function canonKeyByNivel(nivel, s) {
+  return (nivel === 'comuna') ? canonComunaKey(s) : canonBarrioKey(s);
+}
+
 const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
 const lerp = (a,b,t) => a + (b - a) * clamp01(t);
 const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
@@ -269,7 +319,7 @@ function readStyle(message = {}) {
 }
 
 /* ============================================================================
-   Propiedad de nombre por feature
+   Propiedad de nombre por feature + clave canónica
 ============================================================================ */
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
@@ -284,6 +334,9 @@ function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '')
   for (const c of candidates) if (c != null && String(c).trim().length) return c;
   const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
   return anyStr ?? '—';
+}
+function getFeatureKey(feature, nivel, customProp) {
+  return canonKeyByNivel(nivel, getFeatureNameProp(feature, nivel, customProp));
 }
 
 /* ============================================================================
@@ -370,7 +423,7 @@ function toHeadersRows(norm) {
 }
 
 /* ============================================================================
-   Resolver índices (dimensión/métrica)
+   Resolver índices (dimensión/métrica) — ignora param_nivel y evita extras
 ============================================================================ */
 function resolveIndices(message) {
   const T = message?.tables?.DEFAULT;
@@ -415,18 +468,21 @@ function resolveIndices(message) {
   const metId = fieldsByCfg.metricPrimary?.[0]?.id;
   if (metId) metIdx = H.findIndex(h => h.id === metId);
 
-  // 5) Si no hay slot, primera columna marcada como METRIC
+  // 5) Si no hay slot, primera columna marcada como METRIC, EXCLUYENDO metricExtras
+  const extrasIds = (fieldsByCfg.metricExtras || []).map(f => f.id);
   if (metIdx < 0) {
     for (let i = 0; i < H.length; i++) {
       const id = H[i]?.id;
-      if (fields[id]?.concept === 'METRIC') { metIdx = i; break; }
+      if (fields[id]?.concept === 'METRIC' && !extrasIds.includes(id)) { metIdx = i; break; }
     }
   }
 
-  // 6) Último recurso: columna numérica (que no sea la dimensión)
+  // 6) Último recurso: primera columna numérica que no sea la dimensión ni extras
   if (metIdx < 0 && H.length) {
     for (let i = 0; i < H.length; i++) {
       if (i === dimIdx) continue;
+      const id = H[i]?.id;
+      if (extrasIds.includes(id)) continue;
       const v = R?.[0]?.[i];
       const num = toNumberLoose((v && typeof v === 'object' && 'v' in v) ? v.v : v);
       if (Number.isFinite(num)) { metIdx = i; break; }
@@ -436,22 +492,19 @@ function resolveIndices(message) {
   return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
 }
 
-
 /* ============================================================================
-   Agregado por clave (barrio/comuna)
+   Agregado por clave (barrio/comuna) — usa clave CANÓNICA según nivel
 ============================================================================ */
-function buildValueMap(message, dimIdx, metIdx) {
-  const headers  = message?.tables?.DEFAULT?.headers || [];
-  const rows     = message?.tables?.DEFAULT?.rows || [];
+function buildValueMap(message, dimIdx, metIdx, nivel) {
+  const rows = message?.tables?.DEFAULT?.rows || [];
   if (dimIdx < 0 || metIdx < 0) {
     return { map: new Map(), min: NaN, max: NaN, count: 0 };
   }
-  const canon = (s) => normalizeKey(String(s ?? ''));
   const map = new Map();
   for (const row of rows) {
     const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
     if (!keyRaw) continue;
-    const key = canon(keyRaw);
+    const key = canonKeyByNivel(nivel, keyRaw);
     const val = toNumberLoose(row?.[metIdx]);
     if (!Number.isFinite(val)) continue;
     map.set(key, (map.get(key) ?? 0) + val);
@@ -471,19 +524,18 @@ function normColKey(s){
     .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ')
     .replace(/\s+/g,' ').trim().toLowerCase();
 }
-function buildRowLookup(message, dimIdx) {
+function buildRowLookup(message, dimIdx, nivel) {
   const hdrs = message?.tables?.DEFAULT?.headers || [];
   const rows = message?.tables?.DEFAULT?.rows || [];
   const names = hdrs.map(h => h.name || h.id || '');
   const ids   = hdrs.map(h => h.id || '');
 
-  const canon = (s) => normalizeKey(String(s ?? ''));
   const aggByKey = new Map();
 
   for (const row of rows) {
     const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
     if (!keyRaw) continue;
-    const key = canon(keyRaw);
+    const key = canonKeyByNivel(nivel, keyRaw);
 
     let b = aggByKey.get(key);
     if (!b) { b = { __rowCount: 0, __stats: Object.create(null), __statsById: Object.create(null), __byId: Object.create(null) }; aggByKey.set(key, b); }
@@ -520,7 +572,7 @@ function buildRowLookup(message, dimIdx) {
   return {
     get(nombreRaw) {
       if (nombreRaw == null) return null;
-      return aggByKey.get(canon(nombreRaw)) || null;
+      return aggByKey.get(canonKeyByNivel(nivel, nombreRaw)) || null;
     }
   };
 }
@@ -808,7 +860,7 @@ export default function drawVisualization(container, message = {}) {
 
   const style  = readStyle(message);
 
-  // Resolvemos índices de dimensión/métrica
+  // Resolvemos índices de dimensión/métrica (ignora param_nivel y evita extras)
   const idx = resolveIndices(message);
 
   // Nivel: parámetro → estilo → heurística por nombre de dimensión
@@ -832,9 +884,9 @@ export default function drawVisualization(container, message = {}) {
     console.groupEnd();
   }
 
-  // Valor por polígono (SUM met) + lookup por texto
-  const stats     = buildValueMap(message, idx.dim, idx.metric);
-  const rowLookup = buildRowLookup(message, idx.dim);
+  // Valor por polígono (SUM met) + lookup por texto — ambas usando clave CANÓNICA según nivel
+  const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
+  const rowLookup = buildRowLookup(message, idx.dim, nivel);
   const rankCtx   = makeRankCtx(stats?.map?.values?.(), { highIsOne: true });
 
   // Categorías automáticas si valores ∈ {1,2,3}
@@ -859,8 +911,7 @@ export default function drawVisualization(container, message = {}) {
   const map = __leafletState.map;
 
   const styleFn = (feature) => {
-    const nombreRaw = getFeatureNameProp(feature, nivel, style.geojsonProperty);
-    const key = normalizeKey(nombreRaw);
+    const key = getFeatureKey(feature, nivel, style.geojsonProperty);
     const v = stats.map.get(key);
 
     // color
@@ -893,11 +944,10 @@ export default function drawVisualization(container, message = {}) {
   const layer = L.geoJSON(geojson, {
     style: styleFn,
     onEachFeature: (feature, lyr) => {
-      const nombreRaw   = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
-      const nombreLabel = String(nombreRaw);
-      const key         = normalizeKey(nombreRaw);
+      const nombreLabel = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
+      const key         = getFeatureKey(feature, nivel, style.geojsonProperty);
       const v           = stats.map.get(key);
-      const rowByName   = rowLookup.get(nombreRaw);
+      const rowByName   = rowLookup.get(nombreLabel);
 
       const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
       const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
@@ -1121,3 +1171,4 @@ export default function drawVisualization(container, message = {}) {
     initWrapper().catch(err);
   }  
 })();
+
