@@ -374,37 +374,68 @@ function toHeadersRows(norm) {
 ============================================================================ */
 function resolveIndices(message) {
   const T = message?.tables?.DEFAULT;
-  const headers = T?.headers || [];
+  const H = T?.headers || [];
   const fieldsByCfg = message?.fieldsByConfigId || {};
   const fields = message?.fields || {};
+  const R = T?.rows || [];
 
-  // 1) Dimensión por config
+  // Columnas que NO deben ser tomadas como dimensión geográfica (param, jerarquía, etc.)
+  const isParamLike = (h) => {
+    const s = (h?.name || h?.id || '').toLowerCase();
+    return /(^(param.*)?nivel$|^nivel$|jerarquia|^param_|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
+  };
+
+  // 1) DIMENSIÓN: preferir la que el usuario puso en el slot geoDimension
   let dimIdx = -1;
-  if (Array.isArray(fieldsByCfg.geoDimension) && fieldsByCfg.geoDimension[0]) {
-    const id = fieldsByCfg.geoDimension[0].id;
-    dimIdx = headers.findIndex(h => h.id === id);
-  }
-  // 2) fallback por nombre
+  const geoId = fieldsByCfg.geoDimension?.[0]?.id;
+  if (geoId) dimIdx = H.findIndex(h => h.id === geoId);
+
+  // 2) Si no hay slot, buscar por nombre (Barrio/Comuna/DimUbicacion), EXCLUYENDO param-like
   if (dimIdx < 0) {
-    dimIdx = headers.findIndex(h => /barrio|comuna/i.test(h?.name || h?.id));
+    const candidates = H.map((h,i)=>({i,h})).filter(({h})=>{
+      const s = (h?.name || h?.id || '').toLowerCase();
+      if (isParamLike(h)) return false;
+      return /\bdimubicacion\b|\bubicacion\b|\bbarrio\b|\bcomuna\b/.test(s);
+    });
+    if (candidates.length) dimIdx = candidates[0].i;
   }
-  // 3) fallback extremo
-  if (dimIdx < 0 && headers.length) dimIdx = 0;
 
-  // 4) Métrica primaria
+  // 3) Último recurso: primera columna que NO sea métrica ni param-like
+  if (dimIdx < 0) {
+    for (let i = 0; i < H.length; i++) {
+      const id = H[i]?.id;
+      if (isParamLike(H[i])) continue;
+      if (fields[id]?.concept === 'METRIC') continue;
+      dimIdx = i; break;
+    }
+  }
+
+  // 4) MÉTRICA: preferir la del slot metricPrimary
   let metIdx = -1;
-  if (Array.isArray(fieldsByCfg.metricPrimary) && fieldsByCfg.metricPrimary[0]) {
-    const id = fieldsByCfg.metricPrimary[0].id;
-    metIdx = headers.findIndex(h => h.id === id);
-  }
-  if (metIdx < 0) {
-    // buscar primera que sea METRIC (si el motor de campos lo indica)
-    metIdx = headers.findIndex(h => fields?.[h?.id]?.concept === 'METRIC');
-  }
-  if (metIdx < 0 && headers.length > 1) metIdx = 1;
+  const metId = fieldsByCfg.metricPrimary?.[0]?.id;
+  if (metId) metIdx = H.findIndex(h => h.id === metId);
 
-  return { dim: dimIdx, metric: metIdx, headers, fieldsByCfg, fields };
+  // 5) Si no hay slot, primera columna marcada como METRIC
+  if (metIdx < 0) {
+    for (let i = 0; i < H.length; i++) {
+      const id = H[i]?.id;
+      if (fields[id]?.concept === 'METRIC') { metIdx = i; break; }
+    }
+  }
+
+  // 6) Último recurso: columna numérica (que no sea la dimensión)
+  if (metIdx < 0 && H.length) {
+    for (let i = 0; i < H.length; i++) {
+      if (i === dimIdx) continue;
+      const v = R?.[0]?.[i];
+      const num = toNumberLoose((v && typeof v === 'object' && 'v' in v) ? v.v : v);
+      if (Number.isFinite(num)) { metIdx = i; break; }
+    }
+  }
+
+  return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
 }
+
 
 /* ============================================================================
    Agregado por clave (barrio/comuna)

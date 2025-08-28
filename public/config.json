@@ -14,8 +14,7 @@
           "id": "param_nivel",
           "label": "Parámetro Nivel (Barrio/Comuna)",
           "type": "DIMENSION",
-          "options": { "min": 0, "max": 1 },
-          "helpText": "Vinculá aquí un campo calculado espejo del parámetro (p.ej. \"Nivel = param_nivel\"). No lo uses como dimensión principal."
+          "options": { "min": 0, "max": 1 }
         },
         {
           "id": "metricPrimary",
