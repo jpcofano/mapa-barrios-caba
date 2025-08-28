@@ -760,15 +760,10 @@ function makeRankCtx(mapValues, opts = { highIsOne: true }) {
 function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
 
-  // --- CSV helpers robustos (adentro para no tocar el resto del archivo) ---
-  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
+  // === CSV helpers robustos (locales a esta función) ===
 
-  const pickDelimiter = (s) => {
-    const str = String(s ?? '');
-    if (str.includes('|')) return '|';
-    if (str.includes(';')) return ';';
-    return ','; // default
-  };
+  // Obtiene una columna por nombre/ID (usa tu helper global getCol)
+  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
 
   // Split que respeta comillas y NO corta comas decimales/miles
   const splitCsvSmart = (raw, delim = ',') => {
@@ -784,7 +779,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
       if (ch === '"') { inQuotes = !inQuotes; buf += ch; continue; }
 
       if (ch === delim && !inQuotes) {
-        // Evitar cortar "1,23" o "1,234" cuando el delim es coma
+        // Evitar cortar "1,23" o "1,234" cuando el delim es coma y hay dígitos a ambos lados
         if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
           buf += ch;
         } else {
@@ -800,43 +795,67 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     return out;
   };
 
+  // Prueba varios delimitadores y elige el que genere más campos “no vacíos”
+  function chooseBestDelimiter(raw) {
+    const s = String(raw ?? '');
+    const cands = [';', '|', '\t', ',']; // priorizamos evitar la coma
+    let best = ',', bestScore = -1, bestParts = null;
+
+    for (const d of cands) {
+      const parts = splitCsvSmart(s, d);
+      const score = parts.filter(p => String(p).trim() !== '').length;
+      if (score > bestScore) { bestScore = score; best = d; bestParts = parts; }
+    }
+    return { delim: best, parts: bestParts || splitCsvSmart(s, best) };
+  }
+
+  // Permite forzar delimitador desde la etiqueta ( ';' | '|' | ',' | '\t' | 'tab' )
+  const parseOptDelim = (raw) => {
+    if (!raw) return null;
+    const s = String(raw).trim().replace(/^['"]|['"]$/g,''); // quita comillas
+    if (s === '\\t' || s.toLowerCase() === 'tab') return '\t';
+    if (s === ';' || s === '|' || s === ',') return s;
+    return null;
+  };
+
+  // Extrae números del texto respetando formatos (usa tu toNumberLoose global)
   const extractNumbers = (raw) => {
     const s = String(raw ?? '');
     const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
     const m = s.match(rx) || [];
-    // usa toNumberLoose global
     return m.map(toNumberLoose).filter(Number.isFinite);
   };
 
-  const getCsvParts = (colKey) => {
+  const getCsvParts = (colKey, forcedDelim) => {
     const raw = getColVal(rowByName, colKey);
-    const delim = pickDelimiter(raw);
-    return splitCsvSmart(raw, delim);
+    const d = parseOptDelim(forcedDelim);
+    if (d) return splitCsvSmart(raw, d);      // forzado por etiqueta
+    const pick = chooseBestDelimiter(raw);    // autodetección
+    return pick.parts;
   };
 
   // Texto por índice (1-based)
-  const getCsvTxt = (colKey, idx1) => {
-    const parts = getCsvParts(colKey);
+  const getCsvTxt = (colKey, idx1, forcedDelim) => {
+    const parts = getCsvParts(colKey, forcedDelim);
     const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
     return parts[i] ?? '';
   };
 
   // Número por índice (1-based)
-  const getCsvNum = (colKey, idx1) => {
-    const piece = getCsvTxt(colKey, idx1);
+  const getCsvNum = (colKey, idx1, forcedDelim) => {
+    const piece = getCsvTxt(colKey, idx1, forcedDelim);
     const nums = extractNumbers(piece);
     return nums.length ? nums[0] : NaN;
   };
 
-  // -------------------------------------------------------------------------
-
+  // === Reemplazos de la plantilla ===
   let out = String(tpl || '');
 
   // Básicos
   out = out.replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel);
   out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d');
 
-  // Rank / percentil
+  // Rank / percentil (usa rankCtx que ya armás con paintedVals)
   out = out.replace(/\{\{\s*rank\s*\}\}/gi, () => {
     const r = rankCtx?.rankOf?.(v);
     return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
@@ -846,25 +865,39 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     return Number.isFinite(p) ? `${p}º` : 's/d';
   });
 
-  // CSV números / texto por índice (1-based)
-  out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
-    (_m, colKey, idxStr) => {
-      const val = getCsvNum(colKey, idxStr);
+  // CSV números / texto por índice (1-based) — con 3er arg opcional = delimitador
+  // {{csvn:col4,3}} o {{csvn:col4,3,';'}}
+  out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, idxStr, delimOpt) => {
+      const val = getCsvNum(colKey, idxStr, delimOpt);
       return Number.isFinite(val) ? fmt0(val) : 's/d';
     }
   );
-  out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
-    (_m, colKey, idxStr) => getCsvTxt(colKey, idxStr)
+  // {{csv:col4,2}} o {{csv:col4,2,|}}
+  out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, idxStr, delimOpt) => getCsvTxt(colKey, idxStr, delimOpt)
   );
 
   // Tasa con posiciones del CSV (num/den*factor)
-  out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, colKey, iNumStr, iDenStr, factorStr) => {
-      const num = getCsvNum(colKey, iNumStr);
-      const den = getCsvNum(colKey, iDenStr);
+  // {{tasaCsv:col4,1,2,100}} → (csvn#1 / csvn#2) * 100
+  out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^,}]+))?(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, iNumStr, iDenStr, factorStr, delimOpt) => {
+      const num = getCsvNum(colKey, iNumStr, delimOpt);
+      const den = getCsvNum(colKey, iDenStr, delimOpt);
       const factor = Number(factorStr ?? 100);
       const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
         ? (num / den) * (Number.isFinite(factor) ? factor : 100) : NaN;
+      return Number.isFinite(t) ? fmt0(t) : 's/d';
+    }
+  );
+
+  // Alias: promedio simple desde CSV (num/den)
+  // {{avgByCsv:col4,1,3}} ≡ {{tasaCsv:col4,1,3,1}}
+  out = out.replace(/\{\{\s*avgByCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, iNumStr, iDenStr, delimOpt) => {
+      const num = getCsvNum(colKey, iNumStr, delimOpt);
+      const den = getCsvNum(colKey, iDenStr, delimOpt);
+      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0) ? (num / den) : NaN;
       return Number.isFinite(t) ? fmt0(t) : 's/d';
     }
   );
@@ -908,6 +941,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
 
   return out;
 }
+
 
 
 /* ============================================================================
