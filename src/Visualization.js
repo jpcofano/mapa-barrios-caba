@@ -8,128 +8,8 @@ import 'leaflet/dist/leaflet.css';
 import './Visualization.css';
 
 // GeoJSON (Barrio + Comuna)
-import geojsonBarriosText  from './barrioscaba.geojson?raw';
-import geojsonComunasText  from './comunascaba.geojson?raw';  // ← asegurate de tener este archivo
-// Ya lo tenías (por si no):
-function extractParamNivelFromRows(headers, rows) {
-  if (!headers?.length || !rows?.length) return null;
-  const looksLikeNivel = (h) => {
-    const s = (h?.name || h?.id || '').toLowerCase();
-    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
-  };
-  const idx = headers.findIndex(looksLikeNivel);
-  if (idx < 0) return null;
-
-  for (const r of rows) {
-    let v = r?.[idx];
-    if (v && typeof v === 'object' && 'v' in v) v = v.v;
-    const s = String(v ?? '').trim().toLowerCase();
-    if (s.includes('comuna')) return 'comuna';
-    if (s.includes('barrio')) return 'barrio';
-  }
-  return null;
-}
-
-// NUEVO: infiere "comuna" o "barrio" mirando los VALORES de la dimensión geográfica
-function inferNivelFromDimensionValues(headers, rows, dimIdxGuess = 0) {
-  if (!headers?.length || !rows?.length) return null;
-
-  // Intentá ubicar la columna de dimensión “oficial” (slot geoDimension) o una que suene a barrio/comuna
-  let i = dimIdxGuess;
-  if (i == null || i < 0 || i >= headers.length) {
-    i = headers.findIndex(h => /\bdimubicacion\b|\bubicacion\b|\bbarrio\b|\bcomuna\b/i.test((h?.name||h?.id||'')));
-    if (i < 0) i = 0;
-  }
-
-  // Tomamos hasta 20 muestras
-  const sample = rows.slice(0, 20).map(r => {
-    let v = r?.[i]; if (v && typeof v === 'object' && 'v' in v) v = v.v;
-    return String(v ?? '').trim().toLowerCase();
-  }).filter(Boolean);
-
-  if (!sample.length) return null;
-
-  // Si la mayoría contiene “comuna”, es comuna
-  const comunaHits = sample.filter(s => /(^|\s)comuna(\s|$)/.test(s)).length;
-  if (comunaHits >= Math.ceil(sample.length * 0.5)) return 'comuna';
-
-  // Si la mayoría son números chicos (1..15), consideralo comuna
-  const numeric = sample.map(s => {
-    const m = s.match(/\d+/);
-    return m ? parseInt(m[0], 10) : NaN;
-  }).filter(Number.isFinite);
-  if (numeric.length >= Math.ceil(sample.length * 0.5)) {
-    const max = Math.max(...numeric);
-    const min = Math.min(...numeric);
-    if (min >= 1 && max <= 15) return 'comuna';
-  }
-
-  // Si no, asumí barrio
-  return 'barrio';
-}
-
-// Elige separador si el campo viene con ; o |
-function pickDelimiter(s) {
-  const str = String(s ?? '');
-  if (str.includes('|')) return '|';
-  if (str.includes(';')) return ';';
-  return ','; // por defecto
-}
-
-// Split "inteligente": respeta comillas y NO corta comas entre dígitos (decimales/miles)
-function splitCsvSmart(raw, delim = ',') {
-  if (raw == null) return [];
-  const s = String(raw);
-
-  // Si hay comillas, hacemos un split char a char
-  let out = [];
-  let buf = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-
-    // toggle de comillas
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-      buf += ch;
-      continue;
-    }
-
-    // ¿delimitador?
-    if (ch === delim && !inQuotes) {
-      // caso especial para coma decimal/miles: , entre dígitos
-      if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
-        // NO cortar: es parte del número (p.ej. 1,23 o 1,234)
-        buf += ch;
-      } else {
-        out.push(buf.trim().replace(/^"(.*)"$/,'$1')); // quita comillas externas
-        buf = '';
-      }
-      continue;
-    }
-
-    buf += ch;
-  }
-  out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
-  return out;
-}
-
-// Extrae números de un trozo de texto respetando formatos comunes
-function extractNumbers(raw) {
-  const s = String(raw ?? '');
-  const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
-  const m = s.match(rx) || [];
-  const toNumberLoose = (val) => {
-    let t = String(val).replace(/\s|\u00A0/g,'').trim();
-    if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g,'').replace(',', '.'); // 1.234,56 → 1234.56
-    else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g,'');               // 1,234.56 → 1234.56
-    else t = t.replace(',', '.');                                                          // 12,3 → 12.3
-    const n = Number(t);
-    return Number.isFinite(n) ? n : NaN;
-  };
-  return m.map(toNumberLoose).filter(Number.isFinite);
-}
+import geojsonBarriosText from './barrioscaba.geojson?raw';
+import geojsonComunasText from './comunascaba.geojson?raw';
 
 /* ============================================================================
    DEBUG
@@ -220,41 +100,6 @@ const ensureDsccScript = (() => {
 })();
 
 /* ============================================================================
-   Nivel por parámetro → estilo → heurística
-============================================================================ */
-function pickNivel(msg) {
-  // 1) Estilo (fallback)
-  const style = (msg.styleById || {});
-  const styleNivel = style.nivelJerarquia?.value || 'barrio';
-
-  // 2) Intentar leer valor del parámetro desde las filas (si existen)
-  const T = msg.tables?.DEFAULT || {};
-  const H = T.headers || [];
-  const R = T.rows || [];
-  let paramVal = null;
-  if (R?.length && H?.length) {
-    const pIdx = H.findIndex(h => /(^(param.*)?nivel$|^nivel$|jerarquia|barrio.*comuna)/i
-      .test((h?.id || h?.name || '')));
-    if (pIdx >= 0) {
-      const v = R[0][pIdx];
-      paramVal = (v && typeof v === 'object' && 'v' in v) ? v.v : v;
-    }
-  }
-  const byParam = (paramVal || '').toString().toLowerCase();
-  if (byParam.includes('comuna')) return 'comuna';
-  if (byParam.includes('barrio')) return 'barrio';
-
-  // 3) Si no hay filas, inferir por el NOMBRE de la dimensión geográfica usada
-  const dimName = (msg.fieldsByConfigId?.geoDimension?.[0]?.name ||
-                   msg.fieldsByConfigId?.geoDimension?.[0]?.id || '').toLowerCase();
-  if (dimName.includes('comuna')) return 'comuna';
-  if (dimName.includes('barrio')) return 'barrio';
-
-  // 4) Fallback final: estilo
-  return styleNivel;
-}
-
-/* ============================================================================
    GeoJSON
 ============================================================================ */
 let GEOJSON; // barrios
@@ -266,7 +111,7 @@ try { GEOJSON_COMUNAS = JSON.parse(geojsonComunasText); }
 catch (e) { warn('[Viz] GeoJSON comunas no disponible o inválido. (Cargá comunascaba.geojson)'); GEOJSON_COMUNAS = null; }
 
 /* ============================================================================
-   Helpers texto/color/num + CANON CLAVES (← importante para COMUNAS)
+   Helpers texto/num/clave
 ============================================================================ */
 function cleanString(s) {
   return String(s ?? '')
@@ -275,20 +120,14 @@ function cleanString(s) {
     .replace(/\s+/g, ' ').trim().toLowerCase();
 }
 const normalizeKey = (s) => cleanString(s);
-
-// Canon para que “Comuna 1”, “01”, “C1”, “1” → "1"
 function canonComunaKey(s) {
   const t = cleanString(s).replace(/\s+/g,' ');
   const m = t.match(/\d+/);
-  if (m) return String(parseInt(m[0],10)); // "01" → "1"
+  if (m) return String(parseInt(m[0],10));
   return t.replace(/\bcomuna\b/g,'').trim() || t;
 }
-function canonBarrioKey(s) {
-  return cleanString(s);
-}
-function canonKeyByNivel(nivel, s) {
-  return (nivel === 'comuna') ? canonComunaKey(s) : canonBarrioKey(s);
-}
+function canonBarrioKey(s) { return cleanString(s); }
+function canonKeyByNivel(nivel, s) { return (nivel === 'comuna') ? canonComunaKey(s) : canonBarrioKey(s); }
 
 const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
 const lerp = (a,b,t) => a + (b - a) * clamp01(t);
@@ -336,8 +175,8 @@ const PRESET_PALETTES = {
   Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2'],
   soloAmarillo: ['#FFFFF2','#FFFFE6','#FFFFCC','#FFFFB3','#FFFF99','#FFFF66','#FFFF33','#FFFF00'],
   coolToYellow: ['#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00'],
-  baWarm: ['#A7D5C2', '#F08372', '#EC607E','#FFC93A', '#FFD500'],
-  baCool: ['#29BDEF', '#A7D5C2', '#EC607E','#FFC93A', '#FFD500']
+  baWarm: ['#A7D5C2','#F08372','#EC607E','#FFC93A','#FFD500'],
+  baCool: ['#29BDEF','#A7D5C2','#EC607E','#FFC93A','#FFD500']
 };
 function getPaletteFromStyle(style = {}) {
   // 1) Paleta personalizada por texto (#hex,#hex,...)
@@ -346,63 +185,30 @@ function getPaletteFromStyle(style = {}) {
       .split(/[,\s]+/)
       .map(s => s.trim())
       .filter(Boolean);
-    if (arr.length) {
-      return style.invertScale ? arr.slice().reverse() : arr;
-    }
+    if (arr.length) return style.invertScale ? arr.slice().reverse() : arr;
   }
-
-  // 2) Paleta por “colorPalette / palettePreset”
-  const preset = style.colorPalette || style.palettePreset || ''; // compat
+  // 2) Paleta por preset
+  const preset = style.colorPalette || style.palettePreset || '';
   if (preset && PRESET_PALETTES[preset]) {
     const base = PRESET_PALETTES[preset];
     return style.invertScale ? base.slice().reverse() : base;
   }
-
   // 3) Sin paleta → null (usará escala base)
   return null;
 }
-
 function hexToRgb(h){ const x=h.replace('#',''); return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)]; }
 function rgbToHex([r,g,b]){ const h=n=>Math.round(n).toString(16).padStart(2,'0'); return `#${h(r)}${h(g)}${h(b)}`; }
 function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
-function samplePaletteContinuous(colors,t){
-  if (!colors || !colors.length) return '#cccccc';
-  if (colors.length === 1) return colors[0];
-  const pos = clamp01(t) * (colors.length - 1);
-  const i = Math.floor(pos), f = pos - i;
-  return lerpRgb(colors[i], colors[Math.min(i+1, colors.length-1)], f);
-}
 function getColorFromScaleOrPalette(t, style = {}) {
-  const clamp01 = x => Math.max(0, Math.min(1, x));
   const u = clamp01(t);
-
-  // a) si hay paleta (custom o preset), muestrearla de forma continua
   const pal = getPaletteFromStyle(style);
   if (pal && pal.length) {
-    const idx = u * (pal.length - 1);
-    const lo = Math.floor(idx);
-    const hi = Math.min(pal.length - 1, lo + 1);
-    const frac = idx - lo;
-    // interpolación perceptual simple entre dos colores de la paleta
-    const mix = (c1, c2, f) => {
-      const toRGB = hex => {
-        const m = hex.replace('#', '');
-        return [parseInt(m.slice(0,2),16), parseInt(m.slice(2,4),16), parseInt(m.slice(4,6),16)];
-      };
-      const [r1,g1,b1] = toRGB(pal[lo]);
-      const [r2,g2,b2] = toRGB(pal[hi]);
-      const r = Math.round(r1 + (r2 - r1) * frac);
-      const g = Math.round(g1 + (g2 - g1) * frac);
-      const b = Math.round(b1 + (b2 - b1) * frac);
-      return `rgb(${r},${g},${b})`;
-    };
-    return mix(pal[lo], pal[hi], frac);
+    const pos = u * (pal.length - 1);
+    const i = Math.floor(pos), f = pos - i;
+    return lerpRgb(pal[i], pal[Math.min(i+1, pal.length-1)], f);
   }
-
-  // b) si no hay paleta, usar escala base (greenToRed, blueToYellow, etc.)
-  return colorFromScale(style.colorScale || 'greenToRed', u, /*invertAlready=*/false);
+  return colorFromScale(style.colorScale || 'greenToRed', u, /*invert=*/false);
 }
-
 
 /* ============================================================================
    Estilos desde config.json
@@ -415,54 +221,68 @@ function readStyle(message) {
     if (typeof v === 'object' && 'value' in v) return v.value;
     return v;
   };
-  const toNum = (x, def) => {
-    const n = Number(x);
-    return Number.isFinite(n) ? n : def;
-  };
+  const toNum = (x, def) => { const n = Number(x); return Number.isFinite(n) ? n : def; };
 
   return {
     // Geografía
     nivelJerarquia: g('nivelJerarquia', 'barrio'),
+    geojsonProperty: g('geojsonProperty', ''),
 
-    // Colores y escala
+    // Paleta / escala
     palettePreset: g('palettePreset', 'viridis'),
+    customPalette: g('customPalette', ''),
     invertScale: !!g('invertScale', false),
-    noDataColor: g('noDataColor', '#e0e0e0'),
-    breaksMethod: g('breaksMethod', 'quantile'), // quantile | equal | jenks
-    classCount: toNum(g('classCount', '5'), 5),
+    colorScale: g('colorScale', 'greenToRed'),
 
     // Leyenda
-    legendTitle: g('legendTitle', ''),
+    classCount: toNum(g('classCount', '5'), 5),
     legendNoDecimals: !!g('legendNoDecimals', true),
     legendNoDataText: g('legendNoDataText', 'Sin datos'),
+    legendPosition: g('legendPosition', 'bottomright'),
+    showLegend: g('showLegend', true),
 
-    // Borde
+    // Borde / relleno
     strokeColor: g('strokeColor', '#ffffff'),
     strokeWidth: toNum(g('strokeWidth', '1'), 1),
     strokeOpacity: toNum(g('strokeOpacity', '0.7'), 0.7),
+    fillOpacity: toNum(g('fillOpacity', '0.85'), 0.85),
+    colorMissing: g('noDataColor', '#e0e0e0'),
+
+    // Categorización (opcional)
+    categoryMode: !!g('categoryMode', false),
+    cat1Value: toNum(g('cat1Value','1'), 1),
+    cat2Value: toNum(g('cat2Value','2'), 2),
+    cat3Value: toNum(g('cat3Value','3'), 3),
+    cat1Color: g('cat1Color','#1b9e77'),
+    cat2Color: g('cat2Color','#d95f02'),
+    cat3Color: g('cat3Color','#7570b3'),
+    categoryOtherColor: g('categoryOtherColor','#bdbdbd'),
 
     // Tooltip & Popup
-    tooltipTemplate: g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
-    popupTemplate: g('popupTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
+    showLabels: !!g('showLabels', true),
+    tooltipFormat: g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
+    popupFormat:   g('popupTemplate',   '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
 
     // Branding (logo)
     logoEnabled: !!g('logoEnabled', false),
     logoDataUrl: g('logoDataUrl', ''),
-    logoPosition: g('logoPosition', 'br'), // tl | tr | bl | br
+    logoUrl: g('logoUrl', ''),
+    logoPosition: g('logoPosition', 'bottomright'), // 'topleft' | 'topright' | 'bottomleft' | 'bottomright'
+    logoWidthMode: g('logoWidthMode', 'px'),        // 'px' | 'percent'
     logoWidthPx: toNum(g('logoWidthPx', '128'), 128),
-    logoOpacity: toNum(g('logoOpacity', '1'), 1),
+    logoWidthPercent: toNum(g('logoWidthPercent', '10'), 10),
+    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9),
 
-    // Barra de marca (opcional)
+    // Barra de marca
     brandBarEnabled: !!g('brandBarEnabled', false),
     brandBarPosition: g('brandBarPosition', 'bottom'), // top | bottom
-    brandBarHeightPct: toNum(g('brandBarHeightPct', '10'), 10), // %
+    brandBarHeightPct: toNum(g('brandBarHeightPct', '10'), 10),
     brandBarBg: g('brandBarBg', '#FFD500')
   };
 }
 
-
 /* ============================================================================
-   Propiedad de nombre por feature + clave canónica
+   Propiedad de nombre/clave por feature
 ============================================================================ */
 function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
   const p = feature?.properties || {};
@@ -489,7 +309,6 @@ function normalizeDEFAULTTable(data) {
   const T = data?.tables?.DEFAULT;
   if (!T) return { ids: [], names: [], rows: [] };
 
-  // Caso {headers, rows}
   if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
     const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
     let ids   = hdrObjs.map(h => h.id ?? null);
@@ -640,10 +459,8 @@ function resolveIndices(message) {
   return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
 }
 
-
-
 /* ============================================================================
-   Agregado por clave (barrio/comuna) — usa clave CANÓNICA según nivel
+   Agregado por clave (barrio/comuna)
 ============================================================================ */
 function buildValueMap(message, dimIdx, metIdx, nivel) {
   const rows = message?.tables?.DEFAULT?.rows || [];
@@ -778,52 +595,47 @@ function makeRankCtx(mapValues, opts = { highIsOne: true }) {
 }
 
 /* ============================================================================
-   Template tooltip/popup (incluye CSV robusto)
+   CSV smart split (global, para tooltip/popup)
+============================================================================ */
+function splitCsvSmart(raw, delim = ',') {
+  if (raw == null) return [];
+  const s = String(raw);
+  const out = [];
+  let buf = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    if (ch === '"') { inQuotes = !inQuotes; buf += ch; continue; }
+
+    if (ch === delim && !inQuotes) {
+      if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
+        buf += ch; // no cortar comas decimales/miles
+      } else {
+        out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
+        buf = '';
+      }
+      continue;
+    }
+
+    buf += ch;
+  }
+  out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
+  return out;
+}
+
+/* ============================================================================
+   Template tooltip/popup (incluye CSV robusto y macros)
 ============================================================================ */
 function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
 
-  // === CSV helpers robustos (locales a esta función) ===
-
-  // Obtiene una columna por nombre/ID (usa tu helper global getCol)
-  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
-
-  // Split que respeta comillas y NO corta comas decimales/miles
-  const splitCsvSmart = (raw, delim = ',') => {
-    if (raw == null) return [];
-    const s = String(raw);
-    const out = [];
-    let buf = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < s.length; i++) {
-      const ch = s[i];
-
-      if (ch === '"') { inQuotes = !inQuotes; buf += ch; continue; }
-
-      if (ch === delim && !inQuotes) {
-        // Evitar cortar "1,23" o "1,234" cuando el delim es coma y hay dígitos a ambos lados
-        if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
-          buf += ch;
-        } else {
-          out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
-          buf = '';
-        }
-        continue;
-      }
-
-      buf += ch;
-    }
-    out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
-    return out;
-  };
-
-  // Prueba varios delimitadores y elige el que genere más campos “no vacíos”
+  // Delimitador “inteligente”
   function chooseBestDelimiter(raw) {
     const s = String(raw ?? '');
     const cands = [';', '|', '\t', ',']; // priorizamos evitar la coma
     let best = ',', bestScore = -1, bestParts = null;
-
     for (const d of cands) {
       const parts = splitCsvSmart(s, d);
       const score = parts.filter(p => String(p).trim() !== '').length;
@@ -831,54 +643,46 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     }
     return { delim: best, parts: bestParts || splitCsvSmart(s, best) };
   }
-
-  // Permite forzar delimitador desde la etiqueta ( ';' | '|' | ',' | '\t' | 'tab' )
   const parseOptDelim = (raw) => {
     if (!raw) return null;
-    const s = String(raw).trim().replace(/^['"]|['"]$/g,''); // quita comillas
+    const s = String(raw).trim().replace(/^['"]|['"]$/g,'');
     if (s === '\\t' || s.toLowerCase() === 'tab') return '\t';
     if (s === ';' || s === '|' || s === ',') return s;
     return null;
   };
-
-  // Extrae números del texto respetando formatos (usa tu toNumberLoose global)
-  const extractNumbers = (raw) => {
+  const extractNumbersFrom = (raw) => {
     const s = String(raw ?? '');
     const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
     const m = s.match(rx) || [];
     return m.map(toNumberLoose).filter(Number.isFinite);
   };
 
+  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
   const getCsvParts = (colKey, forcedDelim) => {
     const raw = getColVal(rowByName, colKey);
     const d = parseOptDelim(forcedDelim);
-    if (d) return splitCsvSmart(raw, d);      // forzado por etiqueta
-    const pick = chooseBestDelimiter(raw);    // autodetección
+    if (d) return splitCsvSmart(raw, d);
+    const pick = chooseBestDelimiter(raw);
     return pick.parts;
   };
-
-  // Texto por índice (1-based)
   const getCsvTxt = (colKey, idx1, forcedDelim) => {
     const parts = getCsvParts(colKey, forcedDelim);
     const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
     return parts[i] ?? '';
   };
-
-  // Número por índice (1-based)
   const getCsvNum = (colKey, idx1, forcedDelim) => {
     const piece = getCsvTxt(colKey, idx1, forcedDelim);
-    const nums = extractNumbers(piece);
+    const nums = extractNumbersFrom(piece);
     return nums.length ? nums[0] : NaN;
   };
 
-  // === Reemplazos de la plantilla ===
   let out = String(tpl || '');
 
   // Básicos
   out = out.replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel);
   out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d');
 
-  // Rank / percentil (usa rankCtx que ya armás con paintedVals)
+  // Rank / percentil
   out = out.replace(/\{\{\s*rank\s*\}\}/gi, () => {
     const r = rankCtx?.rankOf?.(v);
     return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
@@ -888,21 +692,18 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     return Number.isFinite(p) ? `${p}º` : 's/d';
   });
 
-  // CSV números / texto por índice (1-based) — con 3er arg opcional = delimitador
-  // {{csvn:col4,3}} o {{csvn:col4,3,';'}}
+  // CSV números / texto por índice (1-based) — {{csvn:col4,1}} / {{csv:col4,2,';'}}
   out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, colKey, idxStr, delimOpt) => {
       const val = getCsvNum(colKey, idxStr, delimOpt);
       return Number.isFinite(val) ? fmt0(val) : 's/d';
     }
   );
-  // {{csv:col4,2}} o {{csv:col4,2,|}}
   out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, colKey, idxStr, delimOpt) => getCsvTxt(colKey, idxStr, delimOpt)
   );
 
-  // Tasa con posiciones del CSV (num/den*factor)
-  // {{tasaCsv:col4,1,2,100}} → (csvn#1 / csvn#2) * 100
+  // Tasa con posiciones del CSV (num/den*factor) — {{tasaCsv:col4,1,2,100}}
   out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^,}]+))?(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, colKey, iNumStr, iDenStr, factorStr, delimOpt) => {
       const num = getCsvNum(colKey, iNumStr, delimOpt);
@@ -914,8 +715,7 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
     }
   );
 
-  // Alias: promedio simple desde CSV (num/den)
-  // {{avgByCsv:col4,1,3}} ≡ {{tasaCsv:col4,1,3,1}}
+  // Alias: promedio simple desde CSV (num/den) — {{avgByCsv:col4,1,3}}
   out = out.replace(/\{\{\s*avgByCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
     (_m, colKey, iNumStr, iDenStr, delimOpt) => {
       const num = getCsvNum(colKey, iNumStr, delimOpt);
@@ -965,14 +765,18 @@ function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
   return out;
 }
 
-
-
 /* ============================================================================
-   Borde auto-contraste + Logo
+   Borde auto-contraste + Logo + Brandbar
 ============================================================================ */
+function hexToRGBtuple(hex) {
+  const x = hex.replace('#','');
+  return [parseInt(x.slice(0,2),16), parseInt(x.slice(2,4),16), parseInt(x.slice(4,6),16)];
+}
 function hexLuma(hex){
-  const [r,g,b] = hexToRgb(hex).map(x=>x/255);
-  return 0.2126*r + 0.7152*g + 0.0722*b;
+  try {
+    const [r,g,b] = hexToRGBtuple(hex).map(x=>x/255);
+    return 0.2126*r + 0.7152*g + 0.0722*b;
+  } catch { return 0.5; }
 }
 function autoBorderFor(fill){
   try { return (hexLuma(fill) > 0.7) ? '#666666' : '#F5F5F5'; }
@@ -993,7 +797,7 @@ function hostAllowedForImg(u) {
 function renderLogo(mapContainerEl, style, state) {
   if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
   if (state.logoResizeObs) { try { state.logoResizeObs.disconnect(); } catch {} state.logoResizeObs = null; }
-  if (!style.showLogo) return;
+  if (!style.logoEnabled) return;
 
   let src = (style.logoDataUrl || '').trim();
   if (!src) {
@@ -1035,7 +839,7 @@ function renderLogo(mapContainerEl, style, state) {
   });
 
   const pad = '10px';
-  const pos = (style.logoPosition || 'bottomleft');
+  const pos = (style.logoPosition || 'bottomright');
   img.style.top = (pos.startsWith('top') ? pad : '');
   img.style.bottom = (pos.startsWith('bottom') ? pad : '');
   img.style.left = (pos.endsWith('left') ? pad : '');
@@ -1056,9 +860,7 @@ function renderLogo(mapContainerEl, style, state) {
   }
 }
 function renderBrandBar(mapContainerEl, style, state) {
-  // eliminar anterior
   if (state.brandBarEl) { try { state.brandBarEl.remove(); } catch(e) {} state.brandBarEl = null; }
-
   if (!style.brandBarEnabled) return;
 
   const el = document.createElement('div');
@@ -1069,12 +871,10 @@ function renderBrandBar(mapContainerEl, style, state) {
   el.style.top = sideTop ? '0' : 'auto';
   el.style.bottom = sideTop ? 'auto' : '0';
 
-  // altura según % del alto del mapa
-  const pct = Math.max(0, Math.min(40, Number(style.brandBarHeightPct || 10))); // clamp 0–40
+  const pct = Math.max(0, Math.min(40, Number(style.brandBarHeightPct || 10)));
   const hPx = Math.round((mapContainerEl?.clientHeight || 600) * (pct / 100));
   el.style.height = hPx + 'px';
 
-  // interior (zona de seguridad / contenedor)
   const inner = document.createElement('div');
   inner.className = 'ba-brandbar__spacer';
   el.appendChild(inner);
@@ -1082,7 +882,6 @@ function renderBrandBar(mapContainerEl, style, state) {
   mapContainerEl.appendChild(el);
   state.brandBarEl = el;
 
-  // resize observer para recalcular alto
   if (!state.brandBarResizeObs && 'ResizeObserver' in window) {
     state.brandBarResizeObs = new ResizeObserver(() => {
       if (!state.brandBarEl) return;
@@ -1094,16 +893,15 @@ function renderBrandBar(mapContainerEl, style, state) {
 }
 
 /* ============================================================================
-   Param: leer 'param_nivel' o similares del mensaje
+   Param "nivel" desde mensaje
 ============================================================================ */
-function readParamNivelFromMessage(message, dimIdx) {
+function readParamNivelFromMessage(message) {
   try {
     const T = message?.tables?.DEFAULT;
     const H = T?.headers || [];
     const R = T?.rows || [];
     if (!H.length || !R.length) return null;
 
-    // 1) Buscar columna que suene a "param_nivel / nivel"
     let idx = H.findIndex(h => /param.*nivel|^nivel$|jerarquia|barrio.*comuna/i.test((h?.id || h?.name || '')));
     if (idx >= 0) {
       const raw = R[0]?.[idx];
@@ -1112,22 +910,18 @@ function readParamNivelFromMessage(message, dimIdx) {
       if (s.includes('barrio')) return 'barrio';
     }
 
-    // 2) Heurística por nombre de la dimensión seleccionada
     const f = message?.fieldsByConfigId?.geoDimension?.[0];
     const n = (f?.name || f?.id || '').toLowerCase();
     if (n.includes('comuna')) return 'comuna';
     if (n.includes('barrio')) return 'barrio';
   } catch {}
-  return null; // no se pudo determinar
+  return null;
 }
-// Busca en headers/rows una columna que luzca como "nivel"/"jerarquía"/"barrio-comuna"
-// y devuelve 'barrio' | 'comuna' si la encuentra; si no, null.
-
 
 /* ============================================================================
    Render principal
 ============================================================================ */
-const __leafletState = { map: null, layer: null, legend: null, logoEl: null, logoResizeObs: null };
+const __leafletState = { map: null, layer: null, legend: null, logoEl: null, logoResizeObs: null, brandBarEl: null, brandBarResizeObs: null };
 
 export default function drawVisualization(container, message = {}) {
   container.style.width = '100%';
@@ -1135,25 +929,15 @@ export default function drawVisualization(container, message = {}) {
 
   const style  = readStyle(message);
 
-  // Paleta desde estilo (C)
-  const palette = getPaletteFromStyle(style);
-  const colorFromT = (t) => {
-    const P = Array.isArray(palette) ? palette : ['#ccc','#333'];
-    const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
-    const idx = Math.max(0, Math.min(P.length - 1, Math.round(clamped * (P.length - 1))));
-    return P[idx];
-  };
-
   // Resolvemos índices de dimensión/métrica (ignora param_nivel y evita extras)
   const idx = resolveIndices(message);
 
-  // Nivel: parámetro → estilo → heurística por nombre de dimensión
-  const paramNivel = readParamNivelFromMessage(message, idx.dim);
-  let nivel = paramNivel || style.nivelJerarquia || 'barrio';
+  // Nivel: parámetro → estilo
+  const paramNivel = readParamNivelFromMessage(message);
+  const nivel = paramNivel || style.nivelJerarquia || 'barrio';
 
   // Elegir GeoJSON por nivel
-  const geojson =
-    (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS : GEOJSON;
+  const geojson = (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS : GEOJSON;
 
   if (DEBUG) {
     const s = message?.styleById || message?.style || {};
@@ -1172,7 +956,7 @@ export default function drawVisualization(container, message = {}) {
   const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
   const rowLookup = buildRowLookup(message, idx.dim, nivel);
 
-  // rank solo con lo que REALMENTE se pinta (claves que matchean features del geojson activo)
+  // rank sólo con lo que realmente se pinta
   const paintedVals = [];
   for (const f of (geojson?.features || [])) {
     const key = getFeatureKey(f, nivel, style.geojsonProperty);
@@ -1181,12 +965,7 @@ export default function drawVisualization(container, message = {}) {
   }
   const rankCtx = makeRankCtx(paintedVals, { highIsOne: true });
 
-  // (opcional) debug rápido
-  if (DEBUG) {
-    console.log('[rank] mapSize:', stats.map.size, 'painted:', paintedVals.length);
-  }
-
-  // Categorías automáticas si valores ∈ {1,2,3}
+  // ¿categorías 1..3?
   const uniqVals = new Set();
   for (const v of (stats?.map?.values?.() || [])) { if (Number.isFinite(v)) uniqVals.add(v); }
   const autoCategory = uniqVals.size > 0 && [...uniqVals].every(v => Number.isInteger(v) && v >= 1 && v <= 3);
@@ -1211,7 +990,6 @@ export default function drawVisualization(container, message = {}) {
     const key = getFeatureKey(feature, nivel, style.geojsonProperty);
     const v = stats.map.get(key);
 
-    // color
     let fillColor;
     if (Number.isFinite(v) && categoryModeActive) {
       if (v === style.cat1Value)      fillColor = style.cat1Color;
@@ -1220,21 +998,17 @@ export default function drawVisualization(container, message = {}) {
       else                            fillColor = style.categoryOtherColor || style.colorMissing;
     } else if (stats.count && Number.isFinite(v)) {
       const t = (v - stats.min) / ((stats.max - stats.min) || 1);
-      fillColor = colorFromT(t); // ← usa paleta del estilo
+      fillColor = getColorFromScaleOrPalette(t, style);
     } else {
       fillColor = style.colorMissing;
     }
 
-    const borderCol = style.showBorders
-      ? (String(style.borderColor).toLowerCase() === 'auto' ? autoBorderFor(fillColor) : style.borderColor)
-      : 'transparent';
-
     return {
-      color:   borderCol,
-      weight:  style.showBorders ? style.borderWidth  : 0,
-      opacity: style.showBorders ? style.borderOpacity: 0,
+      color:   style.strokeColor || '#ffffff',
+      weight:  Number(style.strokeWidth) || 1,
+      opacity: Number(style.strokeOpacity),
       fillColor,
-      fillOpacity: style.opacity
+      fillOpacity: Number(style.fillOpacity)
     };
   };
 
@@ -1249,20 +1023,18 @@ export default function drawVisualization(container, message = {}) {
       const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
       const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
 
-      // Tooltip (hover)
       if (style.showLabels) {
         const tooltipHtml = renderTemplate(tooltipTpl, nombreLabel, v, rowByName, rankCtx);
         try { lyr.unbindTooltip(); } catch {}
         lyr.bindTooltip(tooltipHtml, { sticky: true, direction: 'auto', opacity: 0.95 });
       }
-      // Popup (click)
       const popupHtml = renderTemplate(popupTpl, nombreLabel, v, rowByName, rankCtx);
       lyr.bindPopup(popupHtml, { closeButton: false });
     }
   }).addTo(map);
   __leafletState.layer = layer;
 
-  // fit bounds
+  // Fit bounds
   try {
     const b = layer.getBounds();
     if (b?.isValid && b.isValid()) {
@@ -1271,118 +1043,105 @@ export default function drawVisualization(container, message = {}) {
     } else { warn('[Viz] Bounds inválidos'); }
   } catch (e) { warn('[Viz] No se pudo ajustar bounds:', e); }
 
-  // leyenda
- if (style.showLegend) {
-  const legend = L.control({ position: style.legendPosition || 'bottomright' });
-  legend.onAdd = () => {
-    const div = L.DomUtil.create('div', 'legend');
-    try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch {}
-    Object.assign(div.style, {
-      background: 'rgba(255,255,255,.9)',
-      padding: '8px 10px',
-      borderRadius: '8px',
-      boxShadow: '0 1px 4px rgba(0,0,0,.25)',
-      font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-    });
+  // Leyenda
+  if (style.showLegend) {
+    const legend = L.control({ position: style.legendPosition || 'bottomright' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'legend');
+      try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch {}
+      Object.assign(div.style, {
+        background: 'rgba(255,255,255,.9)',
+        padding: '8px 10px',
+        borderRadius: '8px',
+        boxShadow: '0 1px 4px rgba(0,0,0,.25)',
+        font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+      });
 
-    // Leyenda categórica (si corresponde)
-    if (categoryModeActive) {
-      const entries = [
-        { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
-        { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
-        { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
-        { col: style.categoryOtherColor, lbl: 'Otros' }
-      ];
-      for (const e of entries) {
+      if (categoryModeActive) {
+        const entries = [
+          { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
+          { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
+          { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
+          { col: style.categoryOtherColor, lbl: 'Otros' }
+        ];
+        for (const e of entries) {
+          const row = document.createElement('div');
+          row.style.display = 'flex'; row.style.alignItems = 'center'; row.style.gap = '8px'; row.style.margin = '2px 0';
+          const sw = document.createElement('span');
+          sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
+          sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=e.col;
+          const label = document.createElement('span');
+          label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
+          row.appendChild(sw); row.appendChild(label); div.appendChild(row);
+        }
+        return div;
+      }
+
+      if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
+        div.textContent = 'Sin datos'; 
+        return div;
+      }
+
+      const breaks = Number(style.classCount) || 5;
+      const fmt0 = (x) => {
+        if (!Number.isFinite(x)) return 's/d';
+        return style.legendNoDecimals
+          ? Math.round(x).toLocaleString('es-AR')
+          : x.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+      };
+
+      for (let i = 0; i < breaks; i++) {
+        const a   = stats.min + (stats.max - stats.min) * (i / breaks);
+        const b   = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
+        const mid = (a + b) / 2;
+
+        const u   = (mid - stats.min) / ((stats.max - stats.min) || 1);
+        const col = getColorFromScaleOrPalette(u, style);
+
+        const row = document.createElement('div');
+        row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='2px 0';
+
+        const sw = document.createElement('span');
+        sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
+        sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=col;
+
+        const label = document.createElement('span');
+        label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
+
+        row.appendChild(sw); row.appendChild(label); div.appendChild(row);
+      }
+
+      if (style.legendNoDataText) {
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.alignItems = 'center';
         row.style.gap = '8px';
-        row.style.margin = '2px 0';
+        row.style.margin = '6px 0 0';
         const sw = document.createElement('span');
         sw.style.display = 'inline-block';
         sw.style.width = '14px';
         sw.style.height = '14px';
         sw.style.border = '1px solid rgba(0,0,0,.2)';
-        sw.style.background = e.col;
+        sw.style.background = style.colorMissing || '#e0e0e0';
         const label = document.createElement('span');
-        label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
+        label.textContent = style.legendNoDataText;
         row.appendChild(sw);
         row.appendChild(label);
         div.appendChild(row);
       }
+
       return div;
-    }
+    }; // ← cerramos onAdd
 
-    // Leyenda continua
-    if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
-      div.textContent = 'Sin datos';
-      return div;
-    }
+    legend.addTo(map);
+    __leafletState.legend = legend;
+  }
 
-    const breaks = Number(style.classCount) || 5;
-    const fmt0 = (x) => {
-      if (!Number.isFinite(x)) return 's/d';
-      return style.legendNoDecimals
-        ? Math.round(x).toLocaleString('es-AR')
-        : x.toLocaleString('es-AR', { maximumFractionDigits: 2 });
-    };
+  // Branding
+  renderBrandBar(map.getContainer(), style, __leafletState);
+  renderLogo(map.getContainer(), style, __leafletState);
 
-    for (let i = 0; i < breaks; i++) {
-      const a   = stats.min + (stats.max - stats.min) * (i / breaks);
-      const b   = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
-      const mid = (a + b) / 2;
-
-      // color en la leyenda usando la MISMA función que el mapa
-      const u   = (mid - stats.min) / ((stats.max - stats.min) || 1);
-      const col = getColorFromScaleOrPalette(u, style);
-
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.gap = '8px';
-      row.style.margin = '2px 0';
-
-      const sw = document.createElement('span');
-      sw.style.display = 'inline-block';
-      sw.style.width = '14px';
-      sw.style.height = '14px';
-      sw.style.border = '1px solid rgba(0,0,0,.2)';
-      sw.style.background = col;
-
-      const label = document.createElement('span');
-      label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
-
-      row.appendChild(sw);
-      row.appendChild(label);
-      div.appendChild(row);
-    }
-
-    // (Opcional) muestra “Sin datos”
-    if (style.legendNoDataText) {
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.alignItems = 'center';
-      row.style.gap = '8px';
-      row.style.margin = '6px 0 0';
-      const sw = document.createElement('span');
-      sw.style.display = 'inline-block';
-      sw.style.width = '14px';
-      sw.style.height = '14px';
-      sw.style.border = '1px solid rgba(0,0,0,.2)';
-      sw.style.background = style.noDataColor || '#e0e0e0';
-      const label = document.createElement('span');
-      label.textContent = style.legendNoDataText;
-      row.appendChild(sw);
-      row.appendChild(label);
-      div.appendChild(row);
-    }
-
-    return div;
-  }; // ← cerramos onAdd
-
-  legend.addTo(map);
-  __leafletState.legend = legend;
+  if (DEBUG) dbg('[Viz] Render OK — features:', geojson?.features?.length || 0);
 }
 
 /* ============================================================================
@@ -1416,47 +1175,21 @@ export default function drawVisualization(container, message = {}) {
           try { console.log('row[0] keys:', Object.keys(r0)); } catch {}
           if (r0 && typeof r0 === 'object' && 'c' in r0) console.log('row[0].c len:', Array.isArray(r0.c) ? r0.c.length : typeof r0.c);
         } else { console.warn('DEFAULT sin filas'); }
+        console.groupEnd();
       }
 
-    const norm = normalizeDEFAULTTable(data);
-    const { headers, rows } = toHeadersRows(norm);
+      const norm = normalizeDEFAULTTable(data);
+      const { headers, rows } = toHeadersRows(norm);
 
-    // 1) Tomar el estilo entrante
-    const incomingStyle = data.styleById || data.style || {};
-    const overrideStyle = { ...incomingStyle };
-
-    // 2) Intentar leer el NIVEL desde FILAS (parámetro como columna extra)
-    const nivelFromRows = extractParamNivelFromRows(headers, rows);
-
-    // 3) Si no llegó el parámetro, inferirlo mirando la DIMENSIÓN geográfica
-    let dimIdxGuess = 0;
-    const gId = data?.fieldsByConfigId?.geoDimension?.[0]?.id;
-    if (gId) {
-      const idx = headers.findIndex(h => h?.id === gId);
-      if (idx >= 0) dimIdxGuess = idx;
-    }
-    const nivelFromDim = nivelFromRows ? null : inferNivelFromDimensionValues(headers, rows, dimIdxGuess);
-
-    // 4) Si encontramos algo, forzamos nivelJerarquia en el estilo (param > inferencia > estilo)
-    const chosenNivel = nivelFromRows || nivelFromDim || (incomingStyle?.nivelJerarquia?.value) || 'barrio';
-    overrideStyle.nivelJerarquia = { value: chosenNivel };
-    if (DEBUG) console.log('[nivel efectivo] (param>infer>estilo):', chosenNivel);
-
-    // 5) Armar el payload normalizado para drawVisualization
-    const tableLike = {
-      fields: data.fields || {},
-      tables: { DEFAULT: { headers, rows } },
-      fieldsByConfigId: data.fieldsByConfigId || {},
-      styleById: overrideStyle
-    };
-
-
+      const incomingStyle = data.styleById || data.style || {};
+      const tableLike = {
+        fields: data.fields || {},
+        tables: { DEFAULT: { headers, rows } },
+        fieldsByConfigId: data.fieldsByConfigId || {},
+        styleById: incomingStyle || {}
+      };
 
       drawVisualization(ensureContainer(), tableLike);
-      if (DEBUG) { console.groupEnd(); }
-      if (typeof window !== 'undefined') {
-        window.__dsccLast = { raw: data, normalized: norm, headers, rows };
-      }
     } catch (e) {
       err('[Viz] Error procesando datos:', e);
     }
@@ -1465,19 +1198,18 @@ export default function drawVisualization(container, message = {}) {
   async function initWrapper(attempt = 1) {
     try {
       const MAX_ATTEMPTS = 5;
+
       if (window.__VIZ_SUBSCRIBED) { dbg('[Viz] initWrapper: ya suscripto, salgo.'); return; }
 
       const d = await waitForDscc().catch(() => null);
-
       if (d && typeof d.subscribeToData === 'function') {
         dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
-        dbg('[Viz] transforms:', { object: !!d.objectTransform, table: !!d.tableTransform });
 
         if (d.objectTransform) {
           d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
           window.__VIZ_SUBSCRIBED = true;
         } else {
-          console.warn('[Viz] objectTransform no disponible; suscribo sin transform');
+          console.warn('[Viz] objectTransform no disponible; suscribo sin transform (no recomendado)');
           d.subscribeToData(inspectAndRender);
           window.__VIZ_SUBSCRIBED = true;
         }
@@ -1496,6 +1228,7 @@ export default function drawVisualization(container, message = {}) {
             { transform: d.tableTransform }
           );
         }
+
         return;
       }
 
@@ -1506,7 +1239,6 @@ export default function drawVisualization(container, message = {}) {
         return;
       }
 
-      // Fallback (mock)
       err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
       const container = ensureContainer();
       const mockData = {
@@ -1523,6 +1255,7 @@ export default function drawVisualization(container, message = {}) {
           geoDimension: [{ id: 'barrio', name: 'Barrio' }],
           metricPrimary: [{ id: 'poblacion', name: 'Población' }],
         },
+        styleById: {}
       };
       drawVisualization(container, mockData);
       window.__VIZ_SUBSCRIBED = 'mock';
@@ -1534,23 +1267,5 @@ export default function drawVisualization(container, message = {}) {
     document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
   } else {
     initWrapper().catch(err);
-  }  
+  }
 })();
-
-try {
-  window.__viz = Object.assign(window.__viz || {}, {
-    resolveIndices,
-    geoState() {
-      const raw   = window.__dsccLast?.raw;
-      const style = raw?.styleById || {};
-      const styleNivel = style.nivelJerarquia?.value || 'barrio';
-      // Si querés, podés replicar aquí la misma lógica que en drawVisualization
-      return {
-        nivel: styleNivel, // (si usás readParamNivelFromMessage, podés evaluarlo también)
-        hasComunas: !!(GEOJSON_COMUNAS && GEOJSON_COMUNAS.features),
-        comunasCount: (GEOJSON_COMUNAS?.features?.length || 0),
-        barriosCount: (GEOJSON?.features?.length || 0)
-      };
-    }
-  });
-} catch {}
