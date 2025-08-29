@@ -1,35 +1,69 @@
 {
   "data": [
     {
-      "id": "datos",
+      "id": "main",
       "label": "Datos",
       "elements": [
-        { "id": "geoDimension",   "label": "Dimensión geográfica", "type": "DIMENSION" },
-        { "id": "metricPrimary",  "label": "Métrica principal",     "type": "METRIC" },
-        { "id": "extraFields",    "label": "Campos extra (texto)",  "type": "DIMENSION", "acceptsMultiple": true, "optional": true },
-        { "id": "metricExtras",   "label": "Métricas adicionales",  "type": "METRIC",    "acceptsMultiple": true, "optional": true }
+        {
+          "id": "geoDimension",
+          "label": "Dimensión geográfica (Barrio/Comuna)",
+          "type": "DIMENSION",
+          "options": { "min": 1, "max": 1 }
+        },
+        {
+          "id": "param_nivel",
+          "label": "Parámetro Nivel (Barrio/Comuna)",
+          "type": "DIMENSION",
+          "options": { "min": 0, "max": 1 }
+        },
+        {
+          "id": "metricPrimary",
+          "label": "Métrica principal (para colorear)",
+          "type": "METRIC",
+          "options": { "min": 1, "max": 1 }
+        },
+        {
+          "id": "metricExtras",
+          "label": "Métricas adicionales (para tooltip/popup)",
+          "type": "METRIC",
+          "options": { "min": 0, "max": 10 }
+        },
+        {
+          "id": "extraText",
+          "label": "Campos extra (texto para tooltip)",
+          "type": "DIMENSION",
+          "options": { "min": 0, "max": 10 }
+        }
       ]
     }
   ],
+
   "style": [
     {
-      "id": "geografia",
+      "id": "geography",
       "label": "Geografía",
       "elements": [
         {
           "id": "nivelJerarquia",
-          "label": "Nivel",
+          "label": "Nivel (si no hay parámetro)",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Barrio",  "value": "barrio" },
-            { "label": "Comuna",  "value": "comuna" }
+            { "label": "Barrio", "value": "barrio" },
+            { "label": "Comuna", "value": "comuna" }
           ],
           "defaultValue": "barrio"
+        },
+        {
+          "id": "geojsonProperty",
+          "label": "Propiedad alternativa del GeoJSON (opcional)",
+          "type": "INPUT_TEXT",
+          "defaultValue": ""
         }
       ]
     },
+
     {
-      "id": "colores",
+      "id": "colors",
       "label": "Colores y escala",
       "elements": [
         {
@@ -37,126 +71,175 @@
           "label": "Paleta",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "viridis",        "value": "viridis" },
-            { "label": "magma",          "value": "magma" },
-            { "label": "plasma",         "value": "plasma" },
-            { "label": "cividis",        "value": "cividis" },
-            { "label": "turbo",          "value": "turbo" },
-            { "label": "Spectral",       "value": "Spectral" },
-            { "label": "Solo amarillo",  "value": "soloAmarillo" },
-            { "label": "Cool → Amarillo","value": "coolToYellow" },
-            { "label": "BA Warm",        "value": "baWarm" },
-            { "label": "BA Cool",        "value": "baCool" }
+            { "label": "Viridis",         "value": "viridis" },
+            { "label": "Magma",           "value": "magma" },
+            { "label": "Plasma",          "value": "plasma" },
+            { "label": "Cividis",         "value": "cividis" },
+            { "label": "Turbo",           "value": "turbo" },
+            { "label": "Spectral",        "value": "Spectral" },
+            { "label": "Solo amarillo",   "value": "soloAmarillo" },
+            { "label": "Cool → Amarillo", "value": "coolToYellow" },
+            { "label": "BA Warm",         "value": "baWarm" },
+            { "label": "BA Cool",         "value": "baCool" }
           ],
           "defaultValue": "viridis"
         },
-        { "id": "invertScale",  "label": "Invertir escala",    "type": "CHECKBOX",   "defaultValue": false },
-        { "id": "noDataColor",  "label": "Color \"sin datos\"", "type": "FILL_COLOR","defaultValue": "#e0e0e0" },
         {
-          "id": "breaksMethod",
-          "label": "Cortes (clases)",
-          "type": "SELECT_SINGLE",
-          "options": [
-            { "label": "Cuantiles", "value": "quantile" },
-            { "label": "Intervalos iguales", "value": "equal" },
-            { "label": "Jenks (natural breaks)", "value": "jenks" }
-          ],
-          "defaultValue": "quantile"
+          "id": "invertScale",
+          "label": "Invertir escala",
+          "type": "CHECKBOX",
+          "defaultValue": false
         },
         {
-          "id": "classCount",
-          "label": "Cantidad de clases",
+          "id": "noDataColor",
+          "label": "Color “Sin datos”",
+          "type": "FILL_COLOR",
+          "defaultValue": "#d9d9d9"
+        },
+        {
+          "id": "opacity",
+          "label": "Opacidad del relleno",
+          "type": "INPUT_NUMBER",
+          "defaultValue": 0.75
+        }
+      ]
+    },
+
+    {
+      "id": "borders",
+      "label": "Bordes",
+      "elements": [
+        {
+          "id": "showBorders",
+          "label": "Mostrar bordes",
+          "type": "CHECKBOX",
+          "defaultValue": true
+        },
+        {
+          "id": "borderColor",
+          "label": "Color de borde (\"auto\" para contraste)",
+          "type": "INPUT_TEXT",
+          "defaultValue": "auto"
+        },
+        {
+          "id": "borderWidth",
+          "label": "Grosor del borde",
+          "type": "INPUT_NUMBER",
+          "defaultValue": 1
+        },
+        {
+          "id": "borderOpacity",
+          "label": "Opacidad del borde",
+          "type": "INPUT_NUMBER",
+          "defaultValue": 0.7
+        }
+      ]
+    },
+
+    {
+      "id": "legend",
+      "label": "Leyenda",
+      "elements": [
+        {
+          "id": "showLegend",
+          "label": "Mostrar leyenda",
+          "type": "CHECKBOX",
+          "defaultValue": true
+        },
+        {
+          "id": "legendPosition",
+          "label": "Posición",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "5", "value": "5" },
-            { "label": "7", "value": "7" }
+            { "label": "Abajo derecha",  "value": "bottomright" },
+            { "label": "Abajo izquierda","value": "bottomleft" },
+            { "label": "Arriba derecha", "value": "topright" },
+            { "label": "Arriba izquierda","value": "topleft" }
           ],
-          "defaultValue": "5"
+          "defaultValue": "bottomright"
+        },
+        {
+          "id": "legendNoDecimals",
+          "label": "Ocultar decimales",
+          "type": "CHECKBOX",
+          "defaultValue": true
+        },
+        {
+          "id": "legendNoDataText",
+          "label": "Texto “Sin datos”",
+          "type": "INPUT_TEXT",
+          "defaultValue": "Sin datos"
         }
       ]
     },
     {
-      "id": "leyenda",
-      "label": "Leyenda",
-      "elements": [
-        { "id": "legendTitle",      "label": "Título de la leyenda", "type": "TEXTINPUT",  "defaultValue": "" },
-        { "id": "legendNoDecimals", "label": "Sin decimales",        "type": "CHECKBOX",   "defaultValue": true },
-        { "id": "legendNoDataText", "label": "Etiqueta sin datos",   "type": "TEXTINPUT",  "defaultValue": "Sin datos" }
-      ]
-    },
-    {
-      "id": "borde",
-      "label": "Bordes",
-      "elements": [
-        { "id": "strokeColor", "label": "Color del borde", "type": "LINE_COLOR", "defaultValue": "#ffffff" },
-        { "id": "strokeWidth", "label": "Grosor del borde (px)", "type": "TEXTINPUT", "defaultValue": "1" },
-        { "id": "strokeOpacity","label": "Opacidad del borde (0–1)", "type": "TEXTINPUT", "defaultValue": "0.7" }
-      ]
-    },
-    {
-      "id": "tooltipPopup",
-      "label": "Tooltip & Popup",
+      "id": "labels",
+      "label": "Etiquetas / Popup",
       "elements": [
         {
-          "id": "tooltipTemplate",
-          "label": "Plantilla tooltip (HTML)",
-          "type": "TEXTAREA",
-          "defaultValue": "<strong>{{nombre}}</strong> — Comuna {{col:Comuna}}<br/>👥 <strong>Asistentes:</strong> {{csvn:col4,1}} · 📝 <strong>Inscriptos:</strong> {{csvn:col4,2}} ({{tasaCsv:col4,1,2,100}}%)<br/>📊 <strong>Prom. por reunión:</strong> {{tasaCsv:col4,1,3,1}} · 🗓️ <strong>Reuniones:</strong> {{csvn:col4,3}}<br/>🏙️ <strong>Población:</strong> {{max:Poblacion}}<br/>🏅 <strong>Rank:</strong> {{rank}} · <strong>Percentil:</strong> {{percentil}}"
+          "id": "showLabels",
+          "label": "Mostrar tooltip (hover)",
+          "type": "CHECKBOX",
+          "defaultValue": true
         },
         {
-          "id": "popupTemplate",
-          "label": "Plantilla popup (HTML)",
-          "type": "TEXTAREA",
+          "id": "tooltipFormat",
+          "label": "Formato Tooltip (plantilla)",
+          "type": "INPUT_TEXT",
+          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
+        },
+        {
+          "id": "popupFormat",
+          "label": "Formato Popup (plantilla)",
+          "type": "INPUT_TEXT",
           "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
         }
       ]
     },
+
     {
-      "id": "branding",
-      "label": "Branding (logo)",
+      "id": "categories",
+      "label": "Modo por categorías (1–3)",
       "elements": [
-        { "id": "logoEnabled",   "label": "Mostrar logo",         "type": "CHECKBOX",   "defaultValue": false },
-        { "id": "logoDataUrl",   "label": "Logo (data URL PNG/SVG)", "type": "TEXTAREA", "defaultValue": "" },
-        {
-          "id": "logoPosition",
-          "label": "Posición",
-          "type": "SELECT_SINGLE",
-          "options": [
-            { "label": "Arriba izquierda", "value": "tl" },
-            { "label": "Arriba derecha",   "value": "tr" },
-            { "label": "Abajo izquierda",  "value": "bl" },
-            { "label": "Abajo derecha",    "value": "br" }
-          ],
-          "defaultValue": "br"
-        },
-        { "id": "logoWidthPx",  "label": "Ancho máx. (px)", "type": "TEXTINPUT", "defaultValue": "128" },
-        { "id": "logoOpacity",  "label": "Opacidad (0–1)",  "type": "TEXTINPUT", "defaultValue": "1" }
+        { "id": "categoryMode",       "label": "Activar modo por categorías", "type": "CHECKBOX",    "defaultValue": false },
+        { "id": "cat1Value",          "label": "Valor categoría 1",           "type": "INPUT_NUMBER","defaultValue": 1 },
+        { "id": "cat1Color",          "label": "Color categoría 1",           "type": "FILL_COLOR",  "defaultValue": "#f3c300" },
+        { "id": "cat1Label",          "label": "Etiqueta cat. 1",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 1" },
+        { "id": "cat2Value",          "label": "Valor categoría 2",           "type": "INPUT_NUMBER","defaultValue": 2 },
+        { "id": "cat2Color",          "label": "Color categoría 2",           "type": "FILL_COLOR",  "defaultValue": "#4e79a7" },
+        { "id": "cat2Label",          "label": "Etiqueta cat. 2",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 2" },
+        { "id": "cat3Value",          "label": "Valor categoría 3",           "type": "INPUT_NUMBER","defaultValue": 3 },
+        { "id": "cat3Color",          "label": "Color categoría 3",           "type": "FILL_COLOR",  "defaultValue": "#59a14f" },
+        { "id": "cat3Label",          "label": "Etiqueta cat. 3",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 3" },
+        { "id": "categoryOtherColor", "label": "Color \"Otros\"",              "type": "FILL_COLOR",  "defaultValue": "#cccccc" }
       ]
     },
+
     {
-      "id": "brandbar",
-      "label": "Barra de marca",
+      "id": "branding",
+      "label": "Branding (opcional)",
       "elements": [
-        { "id": "brandBarEnabled",   "label": "Activar barra",                 "type": "CHECKBOX",   "defaultValue": false },
+        { "id": "logoEnabled",  "label": "Mostrar logo",                "type": "CHECKBOX",     "defaultValue": false },
+        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL)",   "type": "INPUT_TEXT",   "defaultValue": "" },
+        { "id": "logoWidthPx",  "label": "Ancho del logo (px)",         "type": "INPUT_NUMBER", "defaultValue": 128 },
+        { "id": "logoOpacity",  "label": "Opacidad del logo",           "type": "INPUT_NUMBER", "defaultValue": 1 },
         {
-          "id": "brandBarPosition",
-          "label": "Posición",
+          "id": "logoPosition",
+          "label": "Posición del logo",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Abajo", "value": "bottom" },
-            { "label": "Arriba", "value": "top" }
+            { "label": "Arriba izq.", "value": "topleft" },
+            { "label": "Arriba der.", "value": "topright" },
+            { "label": "Abajo izq.",  "value": "bottomleft" },
+            { "label": "Abajo der.",  "value": "bottomright" }
           ],
-          "defaultValue": "bottom"
-        },
-        { "id": "brandBarHeightPct", "label": "Alto de barra (% del alto del mapa)", "type": "TEXTINPUT", "defaultValue": "10" },
-        { "id": "brandBarBg",        "label": "Color de la barra",             "type": "FILL_COLOR", "defaultValue": "#FFD500" }
+          "defaultValue": "bottomright"
+        }
       ]
     }
   ],
-  "theme": {
-    "palette": [
-      { "value": "#000000" },
-      { "value": "#FFFFFF" }
-    ]
+
+  "supports": {
+    "interactions": ["FILTER"]
   }
 }
