@@ -4,36 +4,11 @@
       "id": "main",
       "label": "Datos",
       "elements": [
-        {
-          "id": "geoDimension",
-          "label": "Dimensión geográfica (Barrio/Comuna)",
-          "type": "DIMENSION",
-          "options": { "min": 1, "max": 1 }
-        },
-        {
-          "id": "param_nivel",
-          "label": "Parámetro Nivel (Barrio/Comuna)",
-          "type": "DIMENSION",
-          "options": { "min": 0, "max": 1 }
-        },
-        {
-          "id": "metricPrimary",
-          "label": "Métrica principal (para colorear)",
-          "type": "METRIC",
-          "options": { "min": 1, "max": 1 }
-        },
-        {
-          "id": "metricExtras",
-          "label": "Métricas adicionales (para tooltip/popup)",
-          "type": "METRIC",
-          "options": { "min": 0, "max": 10 }
-        },
-        {
-          "id": "extraText",
-          "label": "Campos extra (texto para tooltip)",
-          "type": "DIMENSION",
-          "options": { "min": 0, "max": 10 }
-        }
+        { "id": "geoDimension", "label": "Dimensión geográfica (Barrio/Comuna)", "type": "DIMENSION", "options": { "min": 1, "max": 1 } },
+        { "id": "param_nivel",  "label": "Parámetro Nivel (Barrio/Comuna)",      "type": "DIMENSION", "options": { "min": 0, "max": 1 } },
+        { "id": "metricPrimary","label": "Métrica principal (para colorear)",    "type": "METRIC",    "options": { "min": 1, "max": 1 } },
+        { "id": "metricExtras", "label": "Métricas adicionales (tooltip/popup)", "type": "METRIC",    "options": { "min": 0, "max": 10 } },
+        { "id": "extraText",    "label": "Campos extra (texto tooltip)",         "type": "DIMENSION", "options": { "min": 0, "max": 10 } }
       ]
     }
   ],
@@ -56,7 +31,7 @@
         {
           "id": "geojsonProperty",
           "label": "Propiedad alternativa del GeoJSON (opcional)",
-          "type": "INPUT_TEXT",
+          "type": "TEXTINPUT",
           "defaultValue": ""
         }
       ]
@@ -84,24 +59,9 @@
           ],
           "defaultValue": "viridis"
         },
-        {
-          "id": "invertScale",
-          "label": "Invertir escala",
-          "type": "CHECKBOX",
-          "defaultValue": false
-        },
-        {
-          "id": "noDataColor",
-          "label": "Color “Sin datos”",
-          "type": "FILL_COLOR",
-          "defaultValue": "#d9d9d9"
-        },
-        {
-          "id": "opacity",
-          "label": "Opacidad del relleno",
-          "type": "INPUT_NUMBER",
-          "defaultValue": 0.75
-        }
+        { "id": "invertScale", "label": "Invertir escala",     "type": "CHECKBOX",  "defaultValue": false },
+        { "id": "noDataColor", "label": "Color “Sin datos”",   "type": "FILL_COLOR","defaultValue": "#d9d9d9" },
+        { "id": "opacity",     "label": "Opacidad del relleno","type": "NUMBER",    "defaultValue": 0.75 }
       ]
     },
 
@@ -109,30 +69,10 @@
       "id": "borders",
       "label": "Bordes",
       "elements": [
-        {
-          "id": "showBorders",
-          "label": "Mostrar bordes",
-          "type": "CHECKBOX",
-          "defaultValue": true
-        },
-        {
-          "id": "borderColor",
-          "label": "Color de borde (\"auto\" para contraste)",
-          "type": "INPUT_TEXT",
-          "defaultValue": "auto"
-        },
-        {
-          "id": "borderWidth",
-          "label": "Grosor del borde",
-          "type": "INPUT_NUMBER",
-          "defaultValue": 1
-        },
-        {
-          "id": "borderOpacity",
-          "label": "Opacidad del borde",
-          "type": "INPUT_NUMBER",
-          "defaultValue": 0.7
-        }
+        { "id": "showBorders",   "label": "Mostrar bordes",                         "type": "CHECKBOX",  "defaultValue": true },
+        { "id": "borderColor",   "label": "Color de borde (\"auto\" para contraste)","type": "TEXTINPUT", "defaultValue": "auto" },
+        { "id": "borderWidth",   "label": "Grosor del borde",                       "type": "NUMBER",    "defaultValue": 1 },
+        { "id": "borderOpacity", "label": "Opacidad del borde",                     "type": "NUMBER",    "defaultValue": 0.7 }
       ]
     },
 
@@ -140,12 +80,7 @@
       "id": "legend",
       "label": "Leyenda",
       "elements": [
-        {
-          "id": "showLegend",
-          "label": "Mostrar leyenda",
-          "type": "CHECKBOX",
-          "defaultValue": true
-        },
+        { "id": "showLegend",      "label": "Mostrar leyenda",  "type": "CHECKBOX",   "defaultValue": true },
         {
           "id": "legendPosition",
           "label": "Posición",
@@ -158,18 +93,8 @@
           ],
           "defaultValue": "bottomright"
         },
-        {
-          "id": "legendNoDecimals",
-          "label": "Ocultar decimales",
-          "type": "CHECKBOX",
-          "defaultValue": true
-        },
-        {
-          "id": "legendNoDataText",
-          "label": "Texto “Sin datos”",
-          "type": "INPUT_TEXT",
-          "defaultValue": "Sin datos"
-        }
+        { "id": "legendNoDecimals", "label": "Ocultar decimales", "type": "CHECKBOX", "defaultValue": true },
+        { "id": "legendNoDataText", "label": "Texto “Sin datos”", "type": "TEXTINPUT","defaultValue": "Sin datos" }
       ]
     },
 
@@ -177,24 +102,9 @@
       "id": "labels",
       "label": "Etiquetas / Popup",
       "elements": [
-        {
-          "id": "showLabels",
-          "label": "Mostrar tooltip (hover)",
-          "type": "CHECKBOX",
-          "defaultValue": true
-        },
-        {
-          "id": "tooltipFormat",
-          "label": "Formato Tooltip (plantilla)",
-          "type": "INPUT_TEXT",
-          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
-        },
-        {
-          "id": "popupFormat",
-          "label": "Formato Popup (plantilla)",
-          "type": "INPUT_TEXT",
-          "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}"
-        }
+        { "id": "showLabels",    "label": "Mostrar tooltip (hover)", "type": "CHECKBOX",  "defaultValue": true },
+        { "id": "tooltipFormat", "label": "Formato Tooltip",         "type": "TEXTINPUT", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" },
+        { "id": "popupFormat",   "label": "Formato Popup",           "type": "TEXTINPUT", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" }
       ]
     },
 
@@ -202,17 +112,17 @@
       "id": "categories",
       "label": "Modo por categorías (1–3)",
       "elements": [
-        { "id": "categoryMode",       "label": "Activar modo por categorías", "type": "CHECKBOX",     "defaultValue": false },
-        { "id": "cat1Value",          "label": "Valor categoría 1",           "type": "INPUT_NUMBER", "defaultValue": 1 },
-        { "id": "cat1Color",          "label": "Color categoría 1",           "type": "FILL_COLOR",   "defaultValue": "#f3c300" },
-        { "id": "cat1Label",          "label": "Etiqueta cat. 1",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 1" },
-        { "id": "cat2Value",          "label": "Valor categoría 2",           "type": "INPUT_NUMBER", "defaultValue": 2 },
-        { "id": "cat2Color",          "label": "Color categoría 2",           "type": "FILL_COLOR",   "defaultValue": "#4e79a7" },
-        { "id": "cat2Label",          "label": "Etiqueta cat. 2",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 2" },
-        { "id": "cat3Value",          "label": "Valor categoría 3",           "type": "INPUT_NUMBER", "defaultValue": 3 },
-        { "id": "cat3Color",          "label": "Color categoría 3",           "type": "FILL_COLOR",   "defaultValue": "#59a14f" },
-        { "id": "cat3Label",          "label": "Etiqueta cat. 3",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 3" },
-        { "id": "categoryOtherColor", "label": "Color \"Otros\"",              "type": "FILL_COLOR",   "defaultValue": "#cccccc" }
+        { "id": "categoryMode",       "label": "Activar modo por categorías", "type": "CHECKBOX",  "defaultValue": false },
+        { "id": "cat1Value",          "label": "Valor categoría 1",           "type": "NUMBER",    "defaultValue": 1 },
+        { "id": "cat1Color",          "label": "Color categoría 1",           "type": "FILL_COLOR","defaultValue": "#f3c300" },
+        { "id": "cat1Label",          "label": "Etiqueta cat. 1",             "type": "TEXTINPUT", "defaultValue": "Categoría 1" },
+        { "id": "cat2Value",          "label": "Valor categoría 2",           "type": "NUMBER",    "defaultValue": 2 },
+        { "id": "cat2Color",          "label": "Color categoría 2",           "type": "FILL_COLOR","defaultValue": "#4e79a7" },
+        { "id": "cat2Label",          "label": "Etiqueta cat. 2",             "type": "TEXTINPUT", "defaultValue": "Categoría 2" },
+        { "id": "cat3Value",          "label": "Valor categoría 3",           "type": "NUMBER",    "defaultValue": 3 },
+        { "id": "cat3Color",          "label": "Color categoría 3",           "type": "FILL_COLOR","defaultValue": "#59a14f" },
+        { "id": "cat3Label",          "label": "Etiqueta cat. 3",             "type": "TEXTINPUT", "defaultValue": "Categoría 3" },
+        { "id": "categoryOtherColor", "label": "Color \"Otros\"",             "type": "FILL_COLOR","defaultValue": "#cccccc" }
       ]
     },
 
@@ -220,10 +130,10 @@
       "id": "branding",
       "label": "Branding (opcional)",
       "elements": [
-        { "id": "logoEnabled",  "label": "Mostrar logo",                "type": "CHECKBOX",     "defaultValue": false },
-        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL)",   "type": "INPUT_TEXT",   "defaultValue": "" },
-        { "id": "logoWidthPx",  "label": "Ancho del logo (px)",         "type": "INPUT_NUMBER", "defaultValue": 128 },
-        { "id": "logoOpacity",  "label": "Opacidad del logo",           "type": "INPUT_NUMBER", "defaultValue": 1 },
+        { "id": "logoEnabled",  "label": "Mostrar logo",              "type": "CHECKBOX",  "defaultValue": false },
+        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL)", "type": "TEXTINPUT", "defaultValue": "" },
+        { "id": "logoWidthPx",  "label": "Ancho del logo (px)",       "type": "NUMBER",    "defaultValue": 128 },
+        { "id": "logoOpacity",  "label": "Opacidad del logo",         "type": "NUMBER",    "defaultValue": 1 },
         {
           "id": "logoPosition",
           "label": "Posición del logo",
@@ -238,9 +148,5 @@
         }
       ]
     }
-  ],
-
-  "supports": {
-    "interactions": ["FILTER"]
-  }
+  ]
 }
