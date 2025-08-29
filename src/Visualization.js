@@ -1,987 +1,450 @@
-// Community Viz — Leaflet + dscc (bundle-first) + Normalizador + DEBUG
-// Param "Barrio/Comuna" → prioridad; fallback Estilo; fallback heurística.
-// CSV robusto; ranking descendente (1 = máx); leyenda; logo con px/%; paletas modernas.
-
-import * as dsccImported from '@google/dscc';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import './Visualization.css';
-
-// GeoJSON (Barrio + Comuna)
-import geojsonBarriosText from './barrioscaba.geojson?raw';
-import geojsonComunasText from './comunascaba.geojson?raw';
-
+/* global L, GEOJSON, GEOJSON_COMUNAS */
 /* ============================================================================
-   DEBUG
-============================================================================ */
-const DEBUG_DEFAULT = true;
-function detectDebug() {
-  try {
-    const usp = new URLSearchParams(window.location.search || '');
-    if (usp.has('debug')) return usp.get('debug') !== '0';
-  } catch {}
-  if (typeof window !== 'undefined' && typeof window.__VIZ_DEBUG === 'boolean') {
-    return window.__VIZ_DEBUG;
-  }
-  return DEBUG_DEFAULT;
-}
-let DEBUG = detectDebug();
-const dbg  = (...a) => { if (DEBUG) console.log(...a); };
-const warn = (...a) => console.warn(...a);
-const err  = (...a) => console.error(...a);
+ * Visualización coroplética Looker Studio – Barrios/Comunas
+ * - Paletas y escalas (invertible)
+ * - Nivel por parámetro (param_nivel) o por estilo (nivelJerarquia)
+ * - Tooltip/Popup con helpers: {{col:...}}, {{csv:colN,idx}}, {{csvn:colN,idx}},
+ *   {{tasaCsv:colN,iNum,iDen,factor}}, {{tasa:numCol,denCol,factor}},
+ *   {{sum:col}}, {{avg:col}}, {{min:col}}, {{max:col}}, {{count}}, {{rank}}, {{percentil}}
+ * - Bordes con "auto" (contraste) o fijos
+ * - Logo embebido (data URL) con tamaño, opacidad y posición
+ * ==========================================================================*/
 
-/* ============================================================================
-   Exponer dscc importado si el host no lo publica
-============================================================================ */
-(function exposeImportToWindowIfNeeded() {
-  if (typeof window !== 'undefined') {
-    if (!window.dscc && dsccImported && typeof dsccImported.subscribeToData === 'function') {
-      window.dscc = dsccImported;
-    }
-  }
-})();
+const DEBUG = false;
 
-/* ============================================================================
-   Espera a dscc listo + inyección opcional
-============================================================================ */
-function waitForDscc(maxMs = 4000, interval = 40) {
-  return new Promise((resolve, reject) => {
-    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    (function loop() {
-      const d =
-        (dsccImported && typeof dsccImported.subscribeToData === 'function') ? dsccImported :
-        (typeof window !== 'undefined' && window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc :
-        null;
-      if (d) return resolve(d);
-      const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      if (now - t0 > maxMs) return reject(new Error('dscc no está listo'));
-      setTimeout(loop, interval);
-    })();
-  });
-}
-const ensureDsccScript = (() => {
-  let injected = false;
-  return () => {
-    if (typeof window === 'undefined') return false;
-    if (typeof window.dscc?.subscribeToData === 'function') return true;
-    if (injected) return false;
-    if (document.getElementById('__dscc_script')) { injected = true; return false; }
-    const s = document.createElement('script');
-    s.id = '__dscc_script';
-    s.src = 'https://www.gstatic.com/looker-studio/js/dscc.min.js';
-    s.async = true;
-    s.onload = () => dbg('[Viz] dscc.min.js cargado');
-    document.head.appendChild(s);
-    injected = true;
-    return false;
-  };
-})();
+// Estado Leaflet persistente
+const __leafletState = { map: null, layer: null, legend: null, logo: null };
 
-/* ============================================================================
-   Sanitizador query (NBSP, espacios colados en vizId/path)
-============================================================================ */
-(function () {
-  try {
-    const fix = (v) => !v ? v : String(v).replace(/\u00A0/g,'').replace(/\s+/g,'')
-      .replace(/(gs:\/\/[^/]+\/[^^/?#\s]+)[\u00A0 ]+/i, (_m, g1) => g1 + '/');
-    const usp = new URLSearchParams(window.location.search || '');
-    let changed = false;
-    for (const k of ['vizId','js','css','path','debug']) {
-      if (!usp.has(k)) continue;
-      const before = usp.get(k), after = fix(before);
-      if (after !== before) { usp.set(k, after); changed = true; }
-    }
-    if (changed) {
-      const qs = usp.toString();
-      history.replaceState(null,'', qs ? ('?' + qs) : location.pathname);
-      dbg('[Viz] Query saneada'); DEBUG = detectDebug();
-    }
-  } catch (e) { warn('[Viz] Sanitizador URL error:', e); }
-})();
-
-/* ============================================================================
-   GeoJSON
-============================================================================ */
-let GEOJSON; // barrios
-try { GEOJSON = JSON.parse(geojsonBarriosText); }
-catch (e) { err('[Viz] GeoJSON barrios inválido:', e); GEOJSON = { type: 'FeatureCollection', features: [] }; }
-
-let GEOJSON_COMUNAS = null; // comunas
-try { GEOJSON_COMUNAS = JSON.parse(geojsonComunasText); }
-catch (e) { warn('[Viz] GeoJSON comunas no disponible o inválido. (Cargá comunascaba.geojson)'); GEOJSON_COMUNAS = null; }
-
-/* ============================================================================
-   Helpers texto/num/clave
-============================================================================ */
-function cleanString(s) {
-  return String(s ?? '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ')
-    .replace(/\s+/g, ' ').trim().toLowerCase();
-}
-const normalizeKey = (s) => cleanString(s);
-function canonComunaKey(s) {
-  const t = cleanString(s).replace(/\s+/g,' ');
-  const m = t.match(/\d+/);
-  if (m) return String(parseInt(m[0],10));
-  return t.replace(/\bcomuna\b/g,'').trim() || t;
-}
-function canonBarrioKey(s) { return cleanString(s); }
-function canonKeyByNivel(nivel, s) { return (nivel === 'comuna') ? canonComunaKey(s) : canonBarrioKey(s); }
-
-const clamp01 = (t) => Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
-const lerp = (a,b,t) => a + (b - a) * clamp01(t);
-const toHex = (x) => Math.round(x).toString(16).padStart(2,'0');
-const rgb = (r,g,b) => `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-
-function toNumberLoose(x) {
-  if (typeof x === 'number') return x;
-  const cand = x?.v ?? x?.value ?? x;
-  if (typeof cand === 'number') return cand;
-  let s = String(cand ?? '').replace(/\s|\u00A0/g,'').trim();
-  if (!s) return NaN;
-  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g,'').replace(',', '.');
-  else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g,'');
-  else s = s.replace(',', '.');
-  const n = Number(s);
-  return Number.isFinite(n) ? n : NaN;
-}
-const coerceCell = (c) => (c && typeof c === 'object' && 'v' in c) ? c.v : c;
-
-/* ============================================================================
-   Paletas
-============================================================================ */
-function colorFromScale(scaleName, t, invert) {
-  t = clamp01(t); if (invert) t = 1 - t;
-  switch (scaleName) {
-    case 'blueToYellow': { const r=lerp(0,240,t), g=lerp(90,200,t), b=lerp(170,0,t); return rgb(r,g,b); }
-    case 'grayscale':   { const g=lerp(240,40,t); return rgb(g,g,g); }
-    case 'yellow':      { const r=lerp(255,130,t), g=lerp(255,130,t), b=lerp(180,20,t); return rgb(r,g,b); }
-    case 'greenToRed':
-    default:            { const r=lerp(0,204,t),  g=lerp(170,0,t);   return rgb(r,g,0); }
-  }
-}
+/* ---------------------------- Paletas predefinidas ------------------------ */
 const PRESET_PALETTES = {
-  viridis: ['#440154','#482777','#3e4989','#31688e','#26828e','#1f9e89','#35b779','#6ece58','#b5de2b','#fde725'],
-  blues:   ['#f7fbff','#deebf7','#c6dbef','#9ecae1','#6baed6','#4292c6','#2171b5','#08519c'],
-  greens:  ['#f7fcf5','#e5f5e0','#c7e9c0','#a1d99b','#74c476','#41ab5d','#238b45','#005a32'],
-  reds:    ['#fff5f0','#fee0d2','#fcbba1','#fc9272','#fb6a4a','#ef3b2c','#cb181d','#99000d'],
-  purples: ['#fcfbfd','#efedf5','#dadaeb','#bcbddc','#9e9ac8','#807dba','#6a51a3','#54278f'],
-  oranges: ['#fff5eb','#fee6ce','#fdd0a2','#fdae6b','#fd8d3c','#f16913','#d94801','#8c2d04'],
+  viridis: [
+    '#440154', '#482878', '#3e4989', '#31688e', '#26828e',
+    '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725'
+  ],
   magma:   ['#000004','#1b0c41','#4f0a6d','#7c1d6f','#a52c60','#cf4446','#ed6925','#fb9b06','#f7d13d','#fcfdbf'],
   plasma:  ['#0d0887','#5b02a3','#9a179b','#cb4679','#ed7953','#fb9f3a','#fdca26','#f0f921'],
   cividis: ['#00224e','#233b67','#3f5a78','#5a7b89','#7a9c98','#9fbc9f','#c9dca0','#f2f4b3'],
   turbo:   ['#23171b','#3b0f70','#6a00a8','#9c179e','#bd3786','#d8576b','#ed7953','#fb9f3a','#fdca26','#f0f921'],
   Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2'],
-  soloAmarillo: ['#FFFFF2','#FFFFE6','#FFFFCC','#FFFFB3','#FFFF99','#FFFF66','#FFFF33','#FFFF00'],
-  coolToYellow: ['#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00'],
-  baWarm: ['#A7D5C2','#F08372','#EC607E','#FFC93A','#FFD500'],
-  baCool: ['#29BDEF','#A7D5C2','#EC607E','#FFC93A','#FFD500']
+  soloAmarillo: ['#fffde7','#fff9c4','#fff176','#ffee58','#ffeb3b','#fdd835','#fbc02d','#f9a825','#f57f17','#fbc02d'],
+  coolToYellow: ['#0d47a1','#1565c0','#1976d2','#1e88e5','#42a5f5','#64b5f6','#90caf9','#bbdefb','#fbe278','#ffd54f'],
+  // Presets inspirados en GCBA
+  baWarm: ['#f3c300','#f6d24b','#f8dd74','#fae69a','#fbefbd','#fcf6da','#fbf9e8','#fffdf4','#fffef9','#ffffff'],
+  baCool: ['#4e79a7','#6b93be','#86abd0','#a3c1df','#bed4ea','#d6e5f2','#e9f1f8','#f4f8fb','#fafcfe','#ffffff']
 };
-function getPaletteFromStyle(style = {}) {
-  // 1) Paleta personalizada por texto (#hex,#hex,...)
-  if (style.customPalette) {
-    const arr = String(style.customPalette)
-      .split(/[,\s]+/)
-      .map(s => s.trim())
-      .filter(Boolean);
-    if (arr.length) return style.invertScale ? arr.slice().reverse() : arr;
-  }
-  // 2) Paleta por preset
-  const preset = style.colorPalette || style.palettePreset || '';
-  if (preset && PRESET_PALETTES[preset]) {
-    const base = PRESET_PALETTES[preset];
-    return style.invertScale ? base.slice().reverse() : base;
-  }
-  // 3) Sin paleta → null (usará escala base)
-  return null;
-}
-function hexToRgb(h){ const x=h.replace('#',''); return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)]; }
-function rgbToHex([r,g,b]){ const h=n=>Math.round(n).toString(16).padStart(2,'0'); return `#${h(r)}${h(g)}${h(b)}`; }
-function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
-function getColorFromScaleOrPalette(t, style = {}) {
-  const u = clamp01(t);
-  const pal = getPaletteFromStyle(style);
-  if (pal && pal.length) {
-    const pos = u * (pal.length - 1);
-    const i = Math.floor(pos), f = pos - i;
-    return lerpRgb(pal[i], pal[Math.min(i+1, pal.length-1)], f);
-  }
-  return colorFromScale(style.colorScale || 'greenToRed', u, /*invert=*/false);
-}
 
-/* ============================================================================
-   Estilos desde config.json
-============================================================================ */
-function readStyle(message) {
-  const s = (message && (message.styleById || message.style)) || {};
-  const g = (key, def) => {
-    const v = s[key];
-    if (v == null) return def;
-    if (typeof v === 'object' && 'value' in v) return v.value;
-    return v;
+/* -------------------------------- Utilidades ----------------------------- */
+function clamp01(x){ return Math.max(0, Math.min(1, Number(x))); }
+function lerp(a,b,t){ return a + (b-a)*t; }
+function luminance(hex){
+  try{
+    const c = String(hex||'#ccc').replace('#','');
+    const r = parseInt(c.substring(0,2),16)/255;
+    const g = parseInt(c.substring(2,4),16)/255;
+    const b = parseInt(c.substring(4,6),16)/255;
+    const f = (u)=> u <= 0.03928 ? u/12.92 : Math.pow((u+0.055)/1.055,2.4);
+    return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b);
+  }catch(e){ return 0.5; }
+}
+function autoBorderFor(fill){
+  const L = luminance(fill);
+  return L > 0.6 ? '#222' : '#ffffff';
+}
+function toNumberLoose(x){
+  if (x == null) return NaN;
+  // Soporta "1.234,56" y "1,234.56"
+  const s = String(x).replace(/\s+/g,'').replace(/\./g,'').replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function fmtInt(n){ return Number.isFinite(n) ? Math.round(n).toLocaleString('es-AR') : 's/d'; }
+
+/* ----------------------- Lectura de estilo + defaults -------------------- */
+function readStyle(msg){
+  const s = (msg?.styleById || msg?.style || {});
+  const pick = (id, def) => {
+    const v = s[id];
+    if (v && typeof v === 'object' && 'value' in v) return v.value;
+    return (v != null) ? v : def;
   };
-  const toNum = (x, def) => { const n = Number(x); return Number.isFinite(n) ? n : def; };
-
-  return {
+  const style = {
     // Geografía
-    nivelJerarquia: g('nivelJerarquia', 'barrio'),
-    geojsonProperty: g('geojsonProperty', ''),
+    nivelJerarquia: pick('nivelJerarquia', 'barrio'),
+    geojsonProperty: pick('geojsonProperty',''),
 
-    // Paleta / escala
-    palettePreset: g('palettePreset', 'viridis'),
-    customPalette: g('customPalette', ''),
-    invertScale: !!g('invertScale', false),
-    colorScale: g('colorScale', 'greenToRed'),
+    // Colores
+    palettePreset: pick('palettePreset','viridis'),
+    invertScale: !!pick('invertScale', false),
+    colorMissing: pick('noDataColor', '#d9d9d9'),
+    fillOpacity: Number(pick('opacity', 0.75)),
+
+    // Bordes
+    showBorders: !!pick('showBorders', true),
+    borderColor: pick('borderColor','auto'),
+    borderWidth: Number(pick('borderWidth',1)),
+    borderOpacity: Number(pick('borderOpacity',0.7)),
 
     // Leyenda
-    classCount: toNum(g('classCount', '5'), 5),
-    legendNoDecimals: !!g('legendNoDecimals', true),
-    legendNoDataText: g('legendNoDataText', 'Sin datos'),
-    legendPosition: g('legendPosition', 'bottomright'),
-    showLegend: g('showLegend', true),
+    showLegend: !!pick('showLegend', true),
+    legendPosition: pick('legendPosition','bottomright'),
+    legendNoDecimals: !!pick('legendNoDecimals', true),
+    legendNoDataText: pick('legendNoDataText', 'Sin datos'),
 
-    // Borde / relleno
-    strokeColor: g('strokeColor', '#ffffff'),
-    strokeWidth: toNum(g('strokeWidth', '1'), 1),
-    strokeOpacity: toNum(g('strokeOpacity', '0.7'), 0.7),
-    fillOpacity: toNum(g('fillOpacity', '0.85'), 0.85),
-    colorMissing: g('noDataColor', '#e0e0e0'),
+    // Etiquetas
+    showLabels: !!pick('showLabels', true),
+    tooltipFormat: pick('tooltipFormat', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
+    popupFormat: pick('popupFormat', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
 
-    // Categorización (opcional)
-    categoryMode: !!g('categoryMode', false),
-    cat1Value: toNum(g('cat1Value','1'), 1),
-    cat2Value: toNum(g('cat2Value','2'), 2),
-    cat3Value: toNum(g('cat3Value','3'), 3),
-    cat1Color: g('cat1Color','#1b9e77'),
-    cat2Color: g('cat2Color','#d95f02'),
-    cat3Color: g('cat3Color','#7570b3'),
-    categoryOtherColor: g('categoryOtherColor','#bdbdbd'),
+    // Categorías
+    categoryMode: !!pick('categoryMode', false),
+    cat1Value: toNumberLoose(pick('cat1Value',1)),
+    cat1Color: pick('cat1Color','#f3c300'),
+    cat1Label: pick('cat1Label','Categoría 1'),
+    cat2Value: toNumberLoose(pick('cat2Value',2)),
+    cat2Color: pick('cat2Color','#4e79a7'),
+    cat2Label: pick('cat2Label','Categoría 2'),
+    cat3Value: toNumberLoose(pick('cat3Value',3)),
+    cat3Color: pick('cat3Color','#59a14f'),
+    cat3Label: pick('cat3Label','Categoría 3'),
+    categoryOtherColor: pick('categoryOtherColor','#cccccc'),
 
-    // Tooltip & Popup
-    showLabels: !!g('showLabels', true),
-    tooltipFormat: g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
-    popupFormat:   g('popupTemplate',   '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
-
-    // Branding (logo)
-    logoEnabled: !!g('logoEnabled', false),
-    logoDataUrl: g('logoDataUrl', ''),
-    logoUrl: g('logoUrl', ''),
-    logoPosition: g('logoPosition', 'bottomright'), // 'topleft' | 'topright' | 'bottomleft' | 'bottomright'
-    logoWidthMode: g('logoWidthMode', 'px'),        // 'px' | 'percent'
-    logoWidthPx: toNum(g('logoWidthPx', '128'), 128),
-    logoWidthPercent: toNum(g('logoWidthPercent', '10'), 10),
-    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9),
-
-    // Barra de marca
-    brandBarEnabled: !!g('brandBarEnabled', false),
-    brandBarPosition: g('brandBarPosition', 'bottom'), // top | bottom
-    brandBarHeightPct: toNum(g('brandBarHeightPct', '10'), 10),
-    brandBarBg: g('brandBarBg', '#FFD500')
+    // Branding
+    logoEnabled: !!pick('logoEnabled', false),
+    logoDataUrl: pick('logoDataUrl',''),
+    logoWidthPx: Number(pick('logoWidthPx',128)),
+    logoOpacity: Number(pick('logoOpacity',1)),
+    logoPosition: pick('logoPosition','bottomright')
   };
+  try{ window.__lastStyle = style; }catch(e){}
+  return style;
 }
 
-/* ============================================================================
-   Propiedad de nombre/clave por feature
-============================================================================ */
-function getFeatureNameProp(feature, nivelJerarquia = 'barrio', customProp = '') {
-  const p = feature?.properties || {};
-  if (customProp && (customProp in p)) return p[customProp];
-  if (nivelJerarquia === 'comuna') {
-    const raw = p.COMUNA ?? p.comuna ?? p.Comuna ?? p.cod_comuna ?? p.codigo_comuna ?? p.COD_COMUNA;
-    if (raw == null) return raw;
-    const s = String(raw).trim();
-    return /^\d+$/.test(s) ? s.replace(/^0+/, '') : s;
+/* ------------------- Elegir índices de columna DIM/MET ------------------- */
+function resolveIndices(message){
+  const H = message?.tables?.DEFAULT?.headers || [];
+  let dim = -1, metric = -1;
+
+  for (let i=0;i<H.length;i++){
+    const h = H[i];
+    const nm = (h?.name || '').toString().toLowerCase();
+    const id = (h?.id || '').toString().toLowerCase();
+    if (dim === -1 && (h?.type === 'DIMENSION' || /barrio|comuna|nombre/.test(nm))) dim = i;
+    if (metric === -1 && (h?.type === 'METRIC'    || /asistent|total|valor|métric|metric/.test(nm))) metric = i;
+    // si explícitamente se llama "geoDimension" o "metricPrimary"
+    if (id.includes('geodimension')) dim = i;
+    if (id.includes('metricprimary')) metric = i;
   }
-  const candidates = [ p.nombre, p.NOMBRE, p.Nombre, p.barrio, p.BARRIO, p.Barrio, p.name, p.NOMBRE_BARRIO, p.barrio_nombre, p.barrio_desc ];
-  for (const c of candidates) if (c != null && String(c).trim().length) return c;
-  const anyStr = Object.values(p).find(v => typeof v === 'string' && v.trim().length);
-  return anyStr ?? '—';
-}
-function getFeatureKey(feature, nivel, customProp) {
-  return canonKeyByNivel(nivel, getFeatureNameProp(feature, nivel, customProp));
-}
+  if (dim === -1) dim = 0;
+  if (metric === -1 && H.length>1) metric = 1;
 
-/* ============================================================================
-   Normalizar tabla DEFAULT
-============================================================================ */
-function normalizeDEFAULTTable(data) {
-  const T = data?.tables?.DEFAULT;
-  if (!T) return { ids: [], names: [], rows: [] };
-
-  if (Array.isArray(T?.headers) && Array.isArray(T?.rows)) {
-    const hdrObjs = T.headers.map(h => (typeof h === 'string' ? { id: h, name: h } : h));
-    let ids   = hdrObjs.map(h => h.id ?? null);
-    const names = hdrObjs.map(h => h.name ?? h.label ?? h.id ?? '');
-
-    const fieldsAll = [].concat(data?.fields?.dimensions || [], data?.fields?.metrics || []);
-    if (ids.some(id => !id) && fieldsAll.length) {
-      const byName = new Map(fieldsAll.map(f => [String(f.name||'').trim(), f.id]));
-      ids = ids.map((id, i) => id || byName.get(String(names[i]||'').trim()) || names[i] || '');
-    }
-
-    const rows = (T.rows || []).map(row => {
-      const vals = Array.isArray(row) ? row.map(coerceCell)
-                 : (row && typeof row === 'object') ? ids.map(id => coerceCell(row[id]))
-                 : [];
-      return {
-        __vals: vals,
-        byName: Object.fromEntries(names.map((nm,i)=>[nm, vals[i]])),
-        byId:   Object.fromEntries(ids.map((id ,i)=>[id , vals[i]])),
-        __raw: row,
-      };
-    });
-    return { ids, names, rows };
-  }
-
-  // Caso array/obj indexado
-  let rawRows = null;
-  if (Array.isArray(T)) rawRows = T;
-  else if (T && typeof T === 'object') {
-    const ks = Object.keys(T);
-    if (ks.length && ks.every(k => /^\d+$/.test(k))) {
-      ks.sort((a,b)=>(+a)-(+b)); rawRows = ks.map(k => T[k]);
-    }
-  }
-  if (!rawRows) {
-    console.warn('[Viz] DEFAULT con forma no reconocida:', typeof T, T && Object.keys(T));
-    return { ids: [], names: [], rows: [] };
-  }
-
-  const rowsVals = rawRows.map(r => {
-    if (Array.isArray(r)) return r.map(coerceCell);
-    if (r && typeof r === 'object') {
-      if (Array.isArray(r.c)) return r.c.map(coerceCell);
-      const keys = Object.keys(r);
-      if (keys.every(k => /^\d+$/.test(k))) return keys.sort((a,b)=>(+a)-(+b)).map(k => coerceCell(r[k]));
-      return keys.map(k => coerceCell(r[k]));
-    }
-    return [coerceCell(r)];
-  });
-
-  const fieldsAll = [].concat(data?.fields?.dimensions || [], data?.fields?.metrics || []);
-  let ids = [], names = [];
-  if (fieldsAll.length) {
-    ids   = fieldsAll.map((f,i)=> f.id || `col${i}`);
-    names = fieldsAll.map((f,i)=> f.name || f.id || `col${i+1}`);
-  } else {
-    const ncols = rowsVals.reduce((m,r)=>Math.max(m, r.length), 0);
-    ids   = Array.from({length:ncols}, (_,i)=>`col${i}`);
-    names = Array.from({length:ncols}, (_,i)=>`col${i+1}`);
-  }
-
-  const rows = rowsVals.map(vals => ({
-    __vals: vals,
-    byName: Object.fromEntries(names.map((nm,i)=>[nm, vals[i]])),
-    byId:   Object.fromEntries(ids.map((id ,i)=>[id , vals[i]])),
-    __raw: vals
-  }));
-  return { ids, names, rows };
-}
-function toHeadersRows(norm) {
-  const headers = norm.ids.map((id, i) => ({ id, name: norm.names[i] || id }));
-  const rows = norm.rows.map(r => r.__vals);
-  return { headers, rows };
+  return { dim, metric, headers: H };
 }
 
-/* ============================================================================
-   Resolver índices (dimensión/métrica) — ignora param_nivel y evita extras
-============================================================================ */
-function resolveIndices(message) {
-  const T = message?.tables?.DEFAULT;
-  const H = T?.headers || [];
-  const fieldsByCfg = message?.fieldsByConfigId || {};
-  const fields = message?.fields || {};
-  const R = T?.rows || [];
-
-  const isParamLike = (h) => {
-    const s = (h?.name || h?.id || '').toLowerCase();
-    return /(^(param.*)?nivel$|^nivel$|jerar|barrio\s*\/\s*comuna|barrio.*comuna)/i.test(s);
+/* -------------------------- Rank (1 = mayor valor) ----------------------- */
+function makeRankCtx(values, { highIsOne = true } = {}){
+  const vec = values.filter(Number.isFinite).slice().sort((a,b)=>a-b); // asc
+  const N = vec.length;
+  const rankOf = (v)=>{
+    if (!Number.isFinite(v) || !N) return NaN;
+    let idx = vec.findIndex(x => x >= v);
+    if (idx === -1) idx = N-1;
+    return highIsOne ? (N - idx) : (idx + 1);
   };
-
-  const extrasIds   = (fieldsByCfg.metricExtras || []).map(f => f.id);
-  const extraDimIds = (fieldsByCfg.extraFields   || []).map(f => f.id);
-
-  // Dimensión: slot geoDimension, si existe
-  let dimIdx = -1;
-  const geoId = fieldsByCfg.geoDimension?.[0]?.id;
-  if (geoId) dimIdx = H.findIndex(h => h.id === geoId);
-
-  // Si no hay, buscar por nombre (evitando param-like)
-  if (dimIdx < 0) {
-    const candidates = H.map((h,i)=>({i,h})).filter(({h})=>{
-      const s = (h?.name || h?.id || '').toLowerCase();
-      if (isParamLike(h)) return false;
-      return /\bdimubicacion\b|\bubicacion\b|\bbarrio\b|\bcomuna\b/.test(s);
-    });
-    if (candidates.length) dimIdx = candidates[0].i;
-  }
-
-  // Último recurso: primera no-métrica ni param-like
-  if (dimIdx < 0) {
-    for (let i = 0; i < H.length; i++) {
-      const id = H[i]?.id;
-      if (isParamLike(H[i])) continue;
-      if (fields[id]?.concept === 'METRIC') continue;
-      dimIdx = i; break;
-    }
-  }
-
-  // Métrica: slot metricPrimary
-  let metIdx = -1;
-  const metId = fieldsByCfg.metricPrimary?.[0]?.id;
-  if (metId) metIdx = H.findIndex(h => h.id === metId);
-
-  // Si no hay, primera MÉTRIC que no sea extra/extraDim
-  if (metIdx < 0) {
-    for (let i = 0; i < H.length; i++) {
-      const id = H[i]?.id;
-      if (fields[id]?.concept === 'METRIC') {
-        if (extrasIds.includes(id) || extraDimIds.includes(id)) continue;
-        metIdx = i; break;
-      }
-    }
-  }
-
-  // Último recurso: primera numérica que no sea dim ni extras
-  if (metIdx < 0 && H.length) {
-    for (let i = 0; i < H.length; i++) {
-      if (i === dimIdx) continue;
-      const id = H[i]?.id;
-      if (extrasIds.includes(id) || extraDimIds.includes(id)) continue;
-      let v = R?.[0]?.[i];
-      if (v && typeof v === 'object' && 'v' in v) v = v.v;
-      const num = Number.parseFloat(v);
-      if (Number.isFinite(num)) { metIdx = i; break; }
-    }
-  }
-
-  return { dim: dimIdx, metric: metIdx, headers: H, fieldsByCfg, fields };
+  const percentileOf = (v)=>{
+    if (!Number.isFinite(v) || !N) return NaN;
+    let idx = vec.findIndex(x => x >= v);
+    if (idx === -1) idx = N-1;
+    return Math.round(((idx+1)/N)*100);
+  };
+  return { N, rankOf, percentileOf };
 }
 
-/* ============================================================================
-   Agregado por clave (barrio/comuna)
-============================================================================ */
-function buildValueMap(message, dimIdx, metIdx, nivel) {
-  const rows = message?.tables?.DEFAULT?.rows || [];
-  if (dimIdx < 0 || metIdx < 0) {
-    return { map: new Map(), min: NaN, max: NaN, count: 0 };
+/* -------------------------- Claves de feature/row ------------------------ */
+function canonicalKey(str){
+  return String(str||'')
+    .normalize('NFKD')
+    .replace(/[’'`´]/g,'')
+    .replace(/\s+/g,' ')
+    .trim()
+    .toLowerCase();
+}
+function getFeatureKey(f, nivel, overrideProp=''){
+  const props = f?.properties || {};
+  if (overrideProp && props[overrideProp] != null) return canonicalKey(props[overrideProp]);
+  if (nivel === 'comuna'){
+    return canonicalKey(props.comuna || props.Comuna || props.NOMBRE || props.nombre || props.NAME || props.name);
   }
+  return canonicalKey(props.barrio || props.Barrio || props.NOMBRE || props.nombre || props.NAME || props.name);
+}
+function getFeatureNameProp(f, nivel, overrideProp=''){
+  const props = f?.properties || {};
+  if (overrideProp && props[overrideProp] != null) return String(props[overrideProp]);
+  if (nivel === 'comuna'){
+    return String(props.comuna || props.Comuna || props.NOMBRE || props.nombre || props.NAME || props.name || '—');
+  }
+  return String(props.barrio || props.Barrio || props.NOMBRE || props.nombre || props.NAME || props.name || '—');
+}
+
+/* ----------------------------- Data helpers ------------------------------ */
+function buildValueMap(message, dimIdx, metIdx){
+  const H = message?.tables?.DEFAULT?.headers || [];
+  const R = message?.tables?.DEFAULT?.rows || [];
   const map = new Map();
-  for (const row of rows) {
-    const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
-    if (!keyRaw) continue;
-    const key = canonKeyByNivel(nivel, keyRaw);
-    const val = toNumberLoose(row?.[metIdx]);
-    if (!Number.isFinite(val)) continue;
-    map.set(key, (map.get(key) ?? 0) + val);
-  }
-  const values = Array.from(map.values());
-  const min = values.length ? Math.min(...values) : NaN;
-  const max = values.length ? Math.max(...values) : NaN;
-  return { map, min, max, count: values.length };
-}
+  let min=+Infinity, max=-Infinity, count=0;
 
-/* ============================================================================
-   Row lookup agregado por barrio/comuna + estadísticas
-============================================================================ */
-function normColKey(s){
-  return String(s ?? '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[\u00A0\u1680\u2000-\u200D\u202F\u205F\u2060\u3000\uFEFF]/g,' ')
-    .replace(/\s+/g,' ').trim().toLowerCase();
-}
-function buildRowLookup(message, dimIdx, nivel) {
-  const hdrs = message?.tables?.DEFAULT?.headers || [];
-  const rows = message?.tables?.DEFAULT?.rows || [];
-  const names = hdrs.map(h => h.name || h.id || '');
-  const ids   = hdrs.map(h => h.id || '');
-
-  const aggByKey = new Map();
-
-  for (const row of rows) {
-    const keyRaw = (row?.[dimIdx]?.v ?? row?.[dimIdx]?.value ?? row?.[dimIdx] ?? '');
-    if (!keyRaw) continue;
-    const key = canonKeyByNivel(nivel, keyRaw);
-
-    let b = aggByKey.get(key);
-    if (!b) { b = { __rowCount: 0, __stats: Object.create(null), __statsById: Object.create(null), __byId: Object.create(null) }; aggByKey.set(key, b); }
-    b.__rowCount++;
-
-    for (let i = 0; i < names.length; i++) {
-      if (i === dimIdx) continue;
-      const nm  = names[i];
-      const id  = ids[i];
-      const val = (row?.[i]?.v ?? row?.[i]?.value ?? row?.[i]);
-      const n   = toNumberLoose(val);
-
-      if (Number.isFinite(n)) {
-        b[nm] = (b[nm] ?? 0) + n;
-        if (id) b.__byId[id] = (b.__byId[id] ?? 0) + n;
-
-        const k = normColKey(nm);
-        let st = b.__stats[k];
-        if (!st) st = b.__stats[k] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-        st.sum += n; st.count += 1; if (n < st.min) st.min = n; if (n > st.max) st.max = n;
-
-        if (id) {
-          let st2 = b.__statsById[id];
-          if (!st2) st2 = b.__statsById[id] = { sum: 0, count: 0, min: Infinity, max: -Infinity };
-          st2.sum += n; st2.count += 1; if (n < st2.min) st2.min = n; if (n > st2.max) st2.max = n;
-        }
-      } else {
-        if (!(nm in b) && val != null) b[nm] = val;
-        if (id && !(id in b.__byId) && val != null) b.__byId[id] = val;
-      }
+  for (const row of R){
+    const key = canonicalKey(row[dimIdx]);
+    const v = toNumberLoose(row[metIdx]);
+    if (Number.isFinite(v)){
+      const prev = map.get(key) || 0;
+      const sum = prev + v;
+      map.set(key, sum);
+      min = Math.min(min, sum);
+      max = Math.max(max, sum);
+      count++;
     }
   }
+  if (!count){ min = NaN; max = NaN; }
+  return { map, min, max, count, headers:H };
+}
 
-  return {
-    get(nombreRaw) {
-      if (nombreRaw == null) return null;
-      return aggByKey.get(canonKeyByNivel(nivel, nombreRaw)) || null;
+function buildRowLookup(message, dimIdx){
+  const R = message?.tables?.DEFAULT?.rows || [];
+  const H = message?.tables?.DEFAULT?.headers || [];
+  const map = new Map();
+  for (const row of R){
+    const name = String(row[dimIdx] ?? '');
+    const byName = {};
+    const byId = {};
+    for (let i=0;i<H.length;i++){
+      const id = String(H[i]?.id ?? `col${i+1}`);
+      const nm = String(H[i]?.name ?? id);
+      byId[id] = row[i];
+      byName[nm] = row[i];
+      byName[`col${i+1}`] = row[i]; // accesos col1/col2...
     }
-  };
-}
-function getCol(rowAgg, key){
-  if (!rowAgg) return undefined;
-  const k = String(key || '');
-  if (k in rowAgg) return rowAgg[k];
-  if (rowAgg.__byId && k in rowAgg.__byId) return rowAgg.__byId[k];
-  const want = normColKey(k);
-  for (const nm of Object.keys(rowAgg)) {
-    if (normColKey(nm) === want) return rowAgg[nm];
+    map.set(name, { __raw: row, byName, byId });
   }
-  return undefined;
-}
-function getStat(rowAgg, key, which) {
-  if (!rowAgg) return NaN;
-  if (which === 'count' && (key == null || key === '')) return Number(rowAgg.__rowCount || 0);
-  const k = String(key || '');
-  let st = rowAgg.__stats?.[normColKey(k)];
-  if (!st && rowAgg.__statsById && (k in rowAgg.__statsById)) st = rowAgg.__statsById[k];
-  if (!st) return NaN;
-  switch (which) {
-    case 'sum':   return st.sum;
-    case 'avg':   return st.count ? (st.sum / st.count) : NaN;
-    case 'min':   return st.count ? st.min : NaN;
-    case 'max':   return st.count ? st.max : NaN;
-    case 'count': return st.count;
-    default:      return NaN;
-  }
+  return map;
 }
 
-/* ============================================================================
-   Rank / percentil  (1 = máximo)
-============================================================================ */
-function makeRankCtx(mapValues, opts = { highIsOne: true }) {
-  const v = Array.from(mapValues || []).filter(Number.isFinite).sort((a,b)=>a-b); // asc
-  const idx = new Map();
-  for (let i=0;i<v.length;i++) if (!idx.has(v[i])) idx.set(v[i], i);
-  const N = v.length;
+/* ------------------------- Color continuo / paleta ----------------------- */
+function getColorFromScaleOrPalette(t, style){
+  const arr = PRESET_PALETTES[style.palettePreset] || PRESET_PALETTES.viridis;
+  const tt = clamp01(style.invertScale ? 1 - t : t);
+  const n = arr.length;
+  if (n === 0) return '#cccccc';
+  if (n === 1) return arr[0];
+  const idx = tt*(n-1);
+  const i0 = Math.floor(idx);
+  const i1 = Math.min(n-1, i0+1);
+  const frac = idx - i0;
+  const c0 = arr[i0], c1 = arr[i1];
+  const toRGB = (hex)=>({
+    r: parseInt(hex.slice(1,3),16),
+    g: parseInt(hex.slice(3,5),16),
+    b: parseInt(hex.slice(5,7),16)
+  });
+  const a = toRGB(c0), b = toRGB(c1);
+  const r = Math.round(lerp(a.r,b.r,frac)).toString(16).padStart(2,'0');
+  const g = Math.round(lerp(a.g,b.g,frac)).toString(16).padStart(2,'0');
+  const bl= Math.round(lerp(a.b,b.b,frac)).toString(16).padStart(2,'0');
+  return `#${r}${g}${bl}`;
+}
 
-  const rankOf = (x) => {
-    if (!Number.isFinite(x) || !N) return NaN;
-    const i = (idx.get(x) ?? v.indexOf(x));
-    return opts.highIsOne ? (N - i) : (i + 1);
+/* ----------------------------- Logo embebido ----------------------------- */
+function renderLogo(container, style, state){
+  try{
+    if (state.logo){ state.logo.remove(); state.logo = null; }
+    if (!style.logoEnabled || !style.logoDataUrl) return;
+
+    const wrap = document.createElement('div');
+    wrap.style.position = 'absolute';
+    wrap.style.pointerEvents = 'none';
+    wrap.style.opacity = String(clamp01(style.logoOpacity));
+    const pos = style.logoPosition || 'bottomright';
+    const pad = '12px';
+
+    // posicionamiento
+    wrap.style.width = '0'; wrap.style.height = '0';
+    if (pos.includes('bottom')) wrap.style.bottom = pad; else wrap.style.top = pad;
+    if (pos.includes('right'))  wrap.style.right  = pad; else wrap.style.left = pad;
+
+    const img = document.createElement('img');
+    img.src = style.logoDataUrl;
+    img.alt = 'logo';
+    img.style.width = `${Math.max(16, style.logoWidthPx|0)}px`;
+    img.style.height = 'auto';
+    img.style.border = '0';
+
+    wrap.appendChild(img);
+    container.appendChild(wrap);
+    state.logo = wrap;
+  }catch(e){ /* ignorar CSP/errores sin romper */ }
+}
+
+/* --------------------------- Render de plantilla ------------------------- */
+function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx){
+  const getCol = (row, key)=>{
+    if (!row) return undefined;
+    const k = String(key).trim();
+    if (row.byName && k in row.byName) return row.byName[k];
+    if (row.byId && k in row.byId) return row.byId[k];
+    return undefined;
   };
-  const percentileOf = (x) => {
-    if (!Number.isFinite(x) || !N) return NaN;
-    const i = (idx.get(x) ?? v.indexOf(x));
-    return Math.round(100 * (i / (N - 1 || 1))); // 0=min, 100=max
+  const fmt0 = fmtInt;
+
+  // CSV helpers
+  const getCsvTxt = (colKey, idx1)=>{
+    const raw = getCol(rowByName, colKey);
+    const parts = String(raw ?? '').split(/,(?!\d)/).map(s=>s.trim()); // no corta decimales "1,23"
+    const i = Math.max(1, parseInt(idx1,10)||1) - 1;
+    return parts[i] ?? '';
   };
-
-  return { rankOf, percentileOf, N };
-}
-
-/* ============================================================================
-   CSV smart split (global, para tooltip/popup)
-============================================================================ */
-function splitCsvSmart(raw, delim = ',') {
-  if (raw == null) return [];
-  const s = String(raw);
-  const out = [];
-  let buf = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-
-    if (ch === '"') { inQuotes = !inQuotes; buf += ch; continue; }
-
-    if (ch === delim && !inQuotes) {
-      if (delim === ',' && i > 0 && i < s.length - 1 && /\d/.test(s[i - 1]) && /\d/.test(s[i + 1])) {
-        buf += ch; // no cortar comas decimales/miles
-      } else {
-        out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
-        buf = '';
-      }
-      continue;
-    }
-
-    buf += ch;
-  }
-  out.push(buf.trim().replace(/^"(.*)"$/,'$1'));
-  return out;
-}
-
-/* ============================================================================
-   Template tooltip/popup (incluye CSV robusto y macros)
-============================================================================ */
-function renderTemplate(tpl, nombreLabel, v, rowByName, rankCtx) {
-  const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
-
-  // Delimitador “inteligente”
-  function chooseBestDelimiter(raw) {
-    const s = String(raw ?? '');
-    const cands = [';', '|', '\t', ',']; // priorizamos evitar la coma
-    let best = ',', bestScore = -1, bestParts = null;
-    for (const d of cands) {
-      const parts = splitCsvSmart(s, d);
-      const score = parts.filter(p => String(p).trim() !== '').length;
-      if (score > bestScore) { bestScore = score; best = d; bestParts = parts; }
-    }
-    return { delim: best, parts: bestParts || splitCsvSmart(s, best) };
-  }
-  const parseOptDelim = (raw) => {
-    if (!raw) return null;
-    const s = String(raw).trim().replace(/^['"]|['"]$/g,'');
-    if (s === '\\t' || s.toLowerCase() === 'tab') return '\t';
-    if (s === ';' || s === '|' || s === ',') return s;
-    return null;
-  };
-  const extractNumbersFrom = (raw) => {
-    const s = String(raw ?? '');
+  const extractNums = (raw)=>{
+    const s = String(raw??'');
     const rx = /-?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?/g;
     const m = s.match(rx) || [];
     return m.map(toNumberLoose).filter(Number.isFinite);
   };
-
-  const getColVal = (row, colKey) => getCol(row, String(colKey).trim());
-  const getCsvParts = (colKey, forcedDelim) => {
-    const raw = getColVal(rowByName, colKey);
-    const d = parseOptDelim(forcedDelim);
-    if (d) return splitCsvSmart(raw, d);
-    const pick = chooseBestDelimiter(raw);
-    return pick.parts;
+  const getCsvNum = (colKey, idx1)=>{
+    const raw = getCol(rowByName, colKey);
+    const nums = extractNums(raw);
+    const i = Math.max(1, parseInt(idx1,10)||1) - 1;
+    return nums[i];
   };
-  const getCsvTxt = (colKey, idx1, forcedDelim) => {
-    const parts = getCsvParts(colKey, forcedDelim);
-    const i = Math.max(1, parseInt(idx1, 10) || 1) - 1;
-    return parts[i] ?? '';
-  };
-  const getCsvNum = (colKey, idx1, forcedDelim) => {
-    const piece = getCsvTxt(colKey, idx1, forcedDelim);
-    const nums = extractNumbersFrom(piece);
-    return nums.length ? nums[0] : NaN;
+  const getStat = (row, col)=>{
+    const v = toNumberLoose(getCol(row, col));
+    return Number.isFinite(v) ? v : NaN;
   };
 
-  let out = String(tpl || '');
+  let out = String(tpl||'');
 
-  // Básicos
+  // básicos
   out = out.replace(/\{\{\s*nombre\s*\}\}/gi, nombreLabel);
-  out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v != null && Number.isFinite(v)) ? fmt0(v) : 's/d');
+  out = out.replace(/\{\{\s*valor\s*\}\}/gi, (v!=null && Number.isFinite(v)) ? fmt0(v) : 's/d');
 
-  // Rank / percentil
-  out = out.replace(/\{\{\s*rank\s*\}\}/gi, () => {
+  // rank / percentil
+  out = out.replace(/\{\{\s*rank\s*\}\}/gi, ()=>{
     const r = rankCtx?.rankOf?.(v);
     return Number.isFinite(r) ? `${r}/${rankCtx.N}` : 's/d';
   });
-  out = out.replace(/\{\{\s*percentil\s*\}\}/gi, () => {
+  out = out.replace(/\{\{\s*percentil\s*\}\}/gi, ()=>{
     const p = rankCtx?.percentileOf?.(v);
     return Number.isFinite(p) ? `${p}º` : 's/d';
   });
 
-  // CSV números / texto por índice (1-based) — {{csvn:col4,1}} / {{csv:col4,2,';'}}
-  out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, colKey, idxStr, delimOpt) => {
-      const val = getCsvNum(colKey, idxStr, delimOpt);
+  // csv números / texto
+  out = out.replace(/\{\{\s*csvn\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
+    (_m, colKey, idxStr)=>{
+      const val = getCsvNum(colKey, idxStr);
       return Number.isFinite(val) ? fmt0(val) : 's/d';
-    }
-  );
-  out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, colKey, idxStr, delimOpt) => getCsvTxt(colKey, idxStr, delimOpt)
-  );
+    });
+  out = out.replace(/\{\{\s*csv\s*:\s*([^,}]+)\s*,\s*([^}]+)\s*\}\}/gi,
+    (_m, colKey, idxStr) => getCsvTxt(colKey, idxStr));
 
-  // Tasa con posiciones del CSV (num/den*factor) — {{tasaCsv:col4,1,2,100}}
-  out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^,}]+))?(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, colKey, iNumStr, iDenStr, factorStr, delimOpt) => {
-      const num = getCsvNum(colKey, iNumStr, delimOpt);
-      const den = getCsvNum(colKey, iDenStr, delimOpt);
+  // tasaCsv (num/den * factor) usando posiciones del CSV
+  out = out.replace(/\{\{\s*tasaCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
+    (_m, colKey, iNumStr, iDenStr, factorStr)=>{
+      const num = getCsvNum(colKey, iNumStr);
+      const den = getCsvNum(colKey, iDenStr);
       const factor = Number(factorStr ?? 100);
-      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
-        ? (num / den) * (Number.isFinite(factor) ? factor : 100) : NaN;
+      const t = (Number.isFinite(num) && Number.isFinite(den) && den>0)
+        ? (num/den)*(Number.isFinite(factor)?factor:100) : NaN;
       return Number.isFinite(t) ? fmt0(t) : 's/d';
-    }
-  );
+    });
 
-  // Alias: promedio simple desde CSV (num/den) — {{avgByCsv:col4,1,3}}
-  out = out.replace(/\{\{\s*avgByCsv\s*:\s*([^,}]+)\s*,\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, colKey, iNumStr, iDenStr, delimOpt) => {
-      const num = getCsvNum(colKey, iNumStr, delimOpt);
-      const den = getCsvNum(colKey, iDenStr, delimOpt);
-      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0) ? (num / den) : NaN;
-      return Number.isFinite(t) ? fmt0(t) : 's/d';
-    }
-  );
+  // columna directa
+  out = out.replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi,
+    (_m, colName)=>{
+      const raw = getCol(rowByName, String(colName||'').trim());
+      const n = Number(raw);
+      return Number.isFinite(n) ? fmt0(n) : (raw ?? '');
+    });
 
-  // Columna directa por nombre o id
-  out = out.replace(/\{\{\s*col\s*:\s*([^}]+)\s*\}\}/gi, (_m, colName) => {
-    const raw = getCol(rowByName, String(colName || '').trim());
-    const n = Number(raw);
-    return Number.isFinite(n) ? fmt0(n) : (raw ?? '');
-  });
-
-  // Tasa sum(num)/sum(den)*factor sobre columnas agregadas
-  out = out.replace(/\{\{\s*tasa\s*:\s*([^,}]+)\s*,\s*([^,}]+)(?:\s*,\s*([^}]+))?\s*\}\}/gi,
-    (_m, numCol, denCol, factorStr) => {
-      const num = getStat(rowByName, String(numCol).trim(), 'sum');
-      const den = getStat(rowByName, String(denCol).trim(), 'sum');
-      const factor = Number(factorStr ?? 100);
-      const t = (Number.isFinite(num) && Number.isFinite(den) && den > 0)
-        ? (num / den) * (Number.isFinite(factor) ? factor : 100) : NaN;
-      return Number.isFinite(t) ? fmt0(t) : 's/d';
-    }
-  );
-
-  // sum/avg/min/max sobre columnas agregadas
+  // sum/avg/min/max (sobre la columna agregada en la fila del grupo)
   out = out.replace(/\{\{\s*(sum|avg|min|max)\s*:\s*([^}]+?)\s*\}\}/gi,
-    (_m, op, col) => fmt0(getStat(rowByName, String(col).trim(), op.toLowerCase()))
-  );
+    (_m, _op, col)=> fmt0(getStat(rowByName, String(col).trim())));
 
-  // count: usa Record Count si existe; si no, cuenta filas agregadas
+  // count (Record Count o similares si existen en la fila agregada)
   out = out.replace(/\{\{\s*count(?:\s*:\s*([^}]+))?\s*\}\}/gi,
-    (_m, colOpt) => {
-      if (colOpt && colOpt.trim()) return fmt0(getStat(rowByName, colOpt.trim(), 'count'));
+    (_m, colOpt)=>{
+      if (colOpt && colOpt.trim()) return fmt0(getStat(rowByName, colOpt.trim()));
       const candidates = ['Record Count','RECORD_COUNT','record_count','Cant_Reuniones','Reuniones','Cantidad Reuniones'];
-      for (const k of candidates) {
-        const v = Number(getCol(rowByName, k));
+      for (const k of candidates){
+        const v = getStat(rowByName, k);
         if (Number.isFinite(v)) return fmt0(v);
       }
-      return fmt0(getStat(rowByName, '', 'count'));
-    }
-  );
+      return 's/d';
+    });
 
   return out;
 }
 
-/* ============================================================================
-   Borde auto-contraste + Logo + Brandbar
-============================================================================ */
-function hexToRGBtuple(hex) {
-  const x = hex.replace('#','');
-  return [parseInt(x.slice(0,2),16), parseInt(x.slice(2,4),16), parseInt(x.slice(4,6),16)];
-}
-function hexLuma(hex){
-  try {
-    const [r,g,b] = hexToRGBtuple(hex).map(x=>x/255);
-    return 0.2126*r + 0.7152*g + 0.0722*b;
-  } catch { return 0.5; }
-}
-function autoBorderFor(fill){
-  try { return (hexLuma(fill) > 0.7) ? '#666666' : '#F5F5F5'; }
-  catch { return '#000'; }
-}
-function hostAllowedForImg(u) {
-  try {
-    const { hostname } = new URL(u);
-    return /^datastudio\.google\.com$/.test(hostname)
-      || /^lookerstudio\.google\.com$/.test(hostname)
-      || /^drive\.google\.com$/.test(hostname)
-      || /^lh[3-6]\.googleusercontent\.com$/.test(hostname)
-      || /^lh[3-6]\.google\.com$/.test(hostname)
-      || u.startsWith('data:');
-  } catch { return false; }
-}
-
-function renderLogo(mapContainerEl, style, state) {
-  if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
-  if (state.logoResizeObs) { try { state.logoResizeObs.disconnect(); } catch {} state.logoResizeObs = null; }
-  if (!style.logoEnabled) return;
-
-  let src = (style.logoDataUrl || '').trim();
-  if (!src) {
-    const url = (style.logoUrl || '').trim();
-    if (!url || !hostAllowedForImg(url)) {
-      if (!url) return;
-      console.warn('[Logo] Host no permitido por CSP. Usá data: o Drive thumbnail.');
-      return;
-    }
-    src = url;
-  }
-
-  const img = document.createElement('img');
-  img.alt = 'Logo';
-  img.draggable = false;
-  img.src = src;
-
-  const computeWidthPx = () => {
-    if ((style.logoWidthMode || 'px') === 'percent') {
-      const cw = mapContainerEl?.clientWidth || mapContainerEl?.offsetWidth || 800;
-      const pct = Math.max(1, Math.min(100, Number(style.logoWidthPercent || 10)));
-      return Math.max(16, Math.round((cw * pct) / 100));
-    }
-    return Math.max(16, Number(style.logoWidthPx || 160));
-  };
-
-  img.removeAttribute('width'); img.removeAttribute('height');
-  Object.assign(img.style, {
-    position: 'absolute',
-    width: computeWidthPx() + 'px',
-    height: 'auto',
-    aspectRatio: 'auto',
-    objectFit: 'contain',
-    opacity: String(Math.max(0, Math.min(1, Number(style.logoOpacity ?? 0.9)))),
-    pointerEvents: 'none',
-    userSelect: 'none',
-    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.25))',
-    zIndex: '9999'
-  });
-
-  const pad = '10px';
-  const pos = (style.logoPosition || 'bottomright');
-  img.style.top = (pos.startsWith('top') ? pad : '');
-  img.style.bottom = (pos.startsWith('bottom') ? pad : '');
-  img.style.left = (pos.endsWith('left') ? pad : '');
-  img.style.right = (pos.endsWith('right') ? pad : '');
-
-  const el = mapContainerEl;
-  if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-  el.appendChild(img);
-  state.logoEl = img;
-
-  if ((style.logoWidthMode || 'px') === 'percent' && 'ResizeObserver' in window) {
-    const ro = new ResizeObserver(() => {
-      if (!state.logoEl) return;
-      state.logoEl.style.width = computeWidthPx() + 'px';
-    });
-    ro.observe(mapContainerEl);
-    state.logoResizeObs = ro;
-  }
-}
-function renderBrandBar(mapContainerEl, style, state) {
-  if (state.brandBarEl) { try { state.brandBarEl.remove(); } catch(e) {} state.brandBarEl = null; }
-  if (!style.brandBarEnabled) return;
-
-  const el = document.createElement('div');
-  el.className = 'ba-brandbar';
-  el.style.setProperty('--ba-bar-bg', style.brandBarBg || '#FFD500');
-
-  const sideTop = (style.brandBarPosition === 'top');
-  el.style.top = sideTop ? '0' : 'auto';
-  el.style.bottom = sideTop ? 'auto' : '0';
-
-  const pct = Math.max(0, Math.min(40, Number(style.brandBarHeightPct || 10)));
-  const hPx = Math.round((mapContainerEl?.clientHeight || 600) * (pct / 100));
-  el.style.height = hPx + 'px';
-
-  const inner = document.createElement('div');
-  inner.className = 'ba-brandbar__spacer';
-  el.appendChild(inner);
-
-  mapContainerEl.appendChild(el);
-  state.brandBarEl = el;
-
-  if (!state.brandBarResizeObs && 'ResizeObserver' in window) {
-    state.brandBarResizeObs = new ResizeObserver(() => {
-      if (!state.brandBarEl) return;
-      const ch = mapContainerEl?.clientHeight || 600;
-      state.brandBarEl.style.height = Math.round(ch * (pct / 100)) + 'px';
-    });
-  }
-  try { state.brandBarResizeObs?.observe(mapContainerEl); } catch {}
-}
-
-/* ============================================================================
-   Param "nivel" desde mensaje
-============================================================================ */
-function readParamNivelFromMessage(message) {
-  try {
-    const T = message?.tables?.DEFAULT;
-    const H = T?.headers || [];
-    const R = T?.rows || [];
-    if (!H.length || !R.length) return null;
-
-    let idx = H.findIndex(h => /param.*nivel|^nivel$|jerarquia|barrio.*comuna/i.test((h?.id || h?.name || '')));
-    if (idx >= 0) {
-      const raw = R[0]?.[idx];
-      const s = String(raw?.v ?? raw?.value ?? raw ?? '').toLowerCase();
-      if (s.includes('comuna')) return 'comuna';
-      if (s.includes('barrio')) return 'barrio';
-    }
-
-    const f = message?.fieldsByConfigId?.geoDimension?.[0];
-    const n = (f?.name || f?.id || '').toLowerCase();
-    if (n.includes('comuna')) return 'comuna';
-    if (n.includes('barrio')) return 'barrio';
-  } catch {}
-  return null;
-}
-
-/* ============================================================================
-   Render principal
-============================================================================ */
-const __leafletState = { map: null, layer: null, legend: null, logoEl: null, logoResizeObs: null, brandBarEl: null, brandBarResizeObs: null };
-
+/* ============================== RENDER MAPA ============================== */
 export default function drawVisualization(container, message = {}) {
   container.style.width = '100%';
   container.style.height = '100%';
 
   const style  = readStyle(message);
+  const idx    = resolveIndices(message);
 
-  // Resolvemos índices de dimensión/métrica (ignora param_nivel y evita extras)
-  const idx = resolveIndices(message);
-
-  // Nivel: parámetro → estilo
-  const paramNivel = readParamNivelFromMessage(message);
-  const nivel = paramNivel || style.nivelJerarquia || 'barrio';
-
-  // Elegir GeoJSON por nivel
-  const geojson = (nivel === 'comuna' && GEOJSON_COMUNAS) ? GEOJSON_COMUNAS : GEOJSON;
-
-  if (DEBUG) {
-    const s = message?.styleById || message?.style || {};
-    const readable = {};
-    for (const [k,v] of Object.entries(s)) {
-      const val = (v && typeof v === 'object' && 'value' in v) ? v.value : v;
-      readable[k] = (val && typeof val === 'object' && 'color' in val) ? val.color : val;
+  // Nivel desde parámetro (si está vinculado) → estilo
+  const headers = message?.tables?.DEFAULT?.headers || [];
+  const rows    = message?.tables?.DEFAULT?.rows || [];
+  let nivel = style.nivelJerarquia || 'barrio';
+  try{
+    // buscamos una columna que parezca el parámetro (id o name contenga 'param_nivel' o sea 'nivel')
+    let pIdx = headers.findIndex(h => {
+      const id = (h?.id||'').toString().trim().toLowerCase();
+      const nm = (h?.name||'').toString().trim().toLowerCase();
+      return id === 'param_nivel' || nm === 'param_nivel' || id === 'nivel' || nm === 'nivel';
+    });
+    if (pIdx >= 0 && rows.length){
+      const pv = String(rows[0][pIdx] ?? '').toLowerCase();
+      if (pv === 'barrio' || pv === 'comuna') nivel = pv;
     }
-    console.group('[Style dump]'); console.table(readable);
-    console.log('nivel (param>estilo):', nivel);
-    console.log('dimIdx:', idx.dim, 'metIdx:', idx.metric);
-    console.groupEnd();
-  }
+  }catch(e){}
 
-  // Valor por polígono (SUM met) + lookup por texto — ambas usando clave CANÓNICA según nivel
-  const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
-  const rowLookup = buildRowLookup(message, idx.dim, nivel);
+  // GeoJSON por nivel
+  const geojson =
+    (nivel === 'comuna' && typeof GEOJSON_COMUNAS !== 'undefined' && GEOJSON_COMUNAS)
+      ? GEOJSON_COMUNAS : (typeof GEOJSON !== 'undefined' ? GEOJSON : {type:'FeatureCollection',features:[]});
 
-  // rank sólo con lo que realmente se pinta
+  try{ window.__lastNivel = nivel; }catch(e){}
+
+  // Stats y lookup
+  const stats     = buildValueMap(message, idx.dim, idx.metric);
+  const rowLookup = buildRowLookup(message, idx.dim);
+
+  // Rank usando sólo features con match en el geojson activo
   const paintedVals = [];
-  for (const f of (geojson?.features || [])) {
-    const key = getFeatureKey(f, nivel, style.geojsonProperty);
-    const val = stats.map.get(key);
-    if (Number.isFinite(val)) paintedVals.push(val);
+  if (geojson?.features){
+    for (const f of geojson.features){
+      const key = getFeatureKey(f, nivel, style.geojsonProperty);
+      const val = stats.map.get(key);
+      if (Number.isFinite(val)) paintedVals.push(val);
+    }
   }
   const rankCtx = makeRankCtx(paintedVals, { highIsOne: true });
 
-  // ¿categorías 1..3?
+  // Detección automática de modo categórico 1–3
   const uniqVals = new Set();
-  for (const v of (stats?.map?.values?.() || [])) { if (Number.isFinite(v)) uniqVals.add(v); }
-  const autoCategory = uniqVals.size > 0 && [...uniqVals].every(v => Number.isInteger(v) && v >= 1 && v <= 3);
+  for (const v of stats.map.values()){ if (Number.isFinite(v)) uniqVals.add(v); }
+  const autoCategory = uniqVals.size>0 && [...uniqVals].every(v => Number.isInteger(v) && v>=1 && v<=3);
   const categoryModeActive = !!style.categoryMode || autoCategory;
 
-  // Leaflet map
+  // Leaflet map init / cleanup
   if (!__leafletState.map) {
     __leafletState.map = L.map(container, { zoomControl: true, attributionControl: false });
   } else {
     const current = __leafletState.map.getContainer();
     if (current && current !== container) {
       container.appendChild(current);
-      setTimeout(() => { try { __leafletState.map.invalidateSize(); } catch {} }, 0);
+      setTimeout(() => { try { __leafletState.map.invalidateSize(); } catch(e){} }, 0);
     }
-    if (__leafletState.layer)  { try { __leafletState.map.removeLayer(__leafletState.layer); } catch {} }
-    if (__leafletState.legend) { try { __leafletState.legend.remove(); } catch {} }
+    if (__leafletState.layer)  { try { __leafletState.map.removeLayer(__leafletState.layer); } catch(e){} }
+    if (__leafletState.legend) { try { __leafletState.legend.remove(); } catch(e){} }
     __leafletState.layer = null; __leafletState.legend = null;
   }
   const map = __leafletState.map;
@@ -990,6 +453,7 @@ export default function drawVisualization(container, message = {}) {
     const key = getFeatureKey(feature, nivel, style.geojsonProperty);
     const v = stats.map.get(key);
 
+    // color de relleno
     let fillColor;
     if (Number.isFinite(v) && categoryModeActive) {
       if (v === style.cat1Value)      fillColor = style.cat1Color;
@@ -1003,12 +467,16 @@ export default function drawVisualization(container, message = {}) {
       fillColor = style.colorMissing;
     }
 
+    const strokeCol = style.showBorders
+      ? (String(style.borderColor).toLowerCase() === 'auto' ? autoBorderFor(fillColor) : style.borderColor)
+      : 'transparent';
+
     return {
-      color:   style.strokeColor || '#ffffff',
-      weight:  Number(style.strokeWidth) || 1,
-      opacity: Number(style.strokeOpacity),
+      color:       strokeCol,
+      weight:      style.showBorders ? style.borderWidth  : 0,
+      opacity:     style.showBorders ? style.borderOpacity: 0,
       fillColor,
-      fillOpacity: Number(style.fillOpacity)
+      fillOpacity: style.fillOpacity
     };
   };
 
@@ -1023,32 +491,34 @@ export default function drawVisualization(container, message = {}) {
       const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
       const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
 
+      // Tooltip (hover)
       if (style.showLabels) {
         const tooltipHtml = renderTemplate(tooltipTpl, nombreLabel, v, rowByName, rankCtx);
-        try { lyr.unbindTooltip(); } catch {}
+        try { lyr.unbindTooltip(); } catch(e){}
         lyr.bindTooltip(tooltipHtml, { sticky: true, direction: 'auto', opacity: 0.95 });
       }
+      // Popup (click)
       const popupHtml = renderTemplate(popupTpl, nombreLabel, v, rowByName, rankCtx);
       lyr.bindPopup(popupHtml, { closeButton: false });
     }
   }).addTo(map);
   __leafletState.layer = layer;
 
-  // Fit bounds
+  // Ajustar vista
   try {
     const b = layer.getBounds();
     if (b?.isValid && b.isValid()) {
-      map.fitBounds(b, { padding: [16, 16] });
-      setTimeout(() => { try { map.invalidateSize(); } catch {} }, 0);
-    } else { warn('[Viz] Bounds inválidos'); }
-  } catch (e) { warn('[Viz] No se pudo ajustar bounds:', e); }
+      map.fitBounds(b, { padding: [16,16] });
+      setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 0);
+    }
+  } catch (e) { /* noop */ }
 
   // Leyenda
   if (style.showLegend) {
     const legend = L.control({ position: style.legendPosition || 'bottomright' });
     legend.onAdd = () => {
       const div = L.DomUtil.create('div', 'legend');
-      try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch {}
+      try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch(e){}
       Object.assign(div.style, {
         background: 'rgba(255,255,255,.9)',
         padding: '8px 10px',
@@ -1074,20 +544,29 @@ export default function drawVisualization(container, message = {}) {
           label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
           row.appendChild(sw); row.appendChild(label); div.appendChild(row);
         }
+        // “Sin datos”
+        const ndRow = document.createElement('div');
+        ndRow.style.display='flex'; ndRow.style.alignItems='center'; ndRow.style.gap='8px'; ndRow.style.margin='2px 0';
+        const ndSw = document.createElement('span');
+        ndSw.style.display='inline-block'; ndSw.style.width='14px'; ndSw.style.height='14px';
+        ndSw.style.border='1px solid rgba(0,0,0,.2)'; ndSw.style.background = style.colorMissing;
+        const ndLabel = document.createElement('span');
+        ndLabel.textContent = style.legendNoDataText || 'Sin datos';
+        ndRow.appendChild(ndSw); ndRow.appendChild(ndLabel); div.appendChild(ndRow);
+
         return div;
       }
 
       if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
-        div.textContent = 'Sin datos'; 
+        div.textContent = 'Sin datos';
         return div;
       }
 
-      const breaks = Number(style.classCount) || 5;
-      const fmt0 = (x) => {
+      const breaks = 5;
+      const fmt = (x) => {
         if (!Number.isFinite(x)) return 's/d';
-        return style.legendNoDecimals
-          ? Math.round(x).toLocaleString('es-AR')
-          : x.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+        if (style.legendNoDecimals) return Math.round(x).toLocaleString('es-AR');
+        return x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
       };
 
       for (let i = 0; i < breaks; i++) {
@@ -1106,166 +585,29 @@ export default function drawVisualization(container, message = {}) {
         sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=col;
 
         const label = document.createElement('span');
-        label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
+        label.textContent = `${fmt(a)} – ${fmt(b)}`;
 
         row.appendChild(sw); row.appendChild(label); div.appendChild(row);
       }
 
-      if (style.legendNoDataText) {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
-        row.style.gap = '8px';
-        row.style.margin = '6px 0 0';
-        const sw = document.createElement('span');
-        sw.style.display = 'inline-block';
-        sw.style.width = '14px';
-        sw.style.height = '14px';
-        sw.style.border = '1px solid rgba(0,0,0,.2)';
-        sw.style.background = style.colorMissing || '#e0e0e0';
-        const label = document.createElement('span');
-        label.textContent = style.legendNoDataText;
-        row.appendChild(sw);
-        row.appendChild(label);
-        div.appendChild(row);
-      }
+      // “Sin datos”
+      const ndRow = document.createElement('div');
+      ndRow.style.display='flex'; ndRow.style.alignItems='center'; ndRow.style.gap='8px'; ndRow.style.margin='2px 0';
+      const ndSw = document.createElement('span');
+      ndSw.style.display='inline-block'; ndSw.style.width='14px'; ndSw.style.height='14px';
+      ndSw.style.border='1px solid rgba(0,0,0,.2)'; ndSw.style.background = style.colorMissing;
+      const ndLabel = document.createElement('span');
+      ndLabel.textContent = style.legendNoDataText || 'Sin datos';
+      ndRow.appendChild(ndSw); ndRow.appendChild(ndLabel); div.appendChild(ndRow);
 
       return div;
-    }; // ← cerramos onAdd
-
+    };
     legend.addTo(map);
     __leafletState.legend = legend;
   }
 
-  // Branding
-  renderBrandBar(map.getContainer(), style, __leafletState);
+  // Logo
   renderLogo(map.getContainer(), style, __leafletState);
 
-  if (DEBUG) dbg('[Viz] Render OK — features:', geojson?.features?.length || 0);
+  if (DEBUG) console.log('[Viz] Render OK — nivel:', nivel, 'features:', geojson?.features?.length||0);
 }
-
-/* ============================================================================
-   Wrapper dscc
-============================================================================ */
-(function () {
-  'use strict';
-
-  function ensureContainer() {
-    let el = document.getElementById('container');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'container';
-      el.style.width = '100%';
-      el.style.height = '100%';
-      document.body.appendChild(el);
-    }
-    return el;
-  }
-
-  function inspectAndRender(data) {
-    try {
-      if (DEBUG) {
-        console.group('[Inspector] DSCC objectTransform');
-        const t = data?.tables?.DEFAULT;
-        console.log('DEFAULT keys:', t ? Object.keys(t) : '(no DEFAULT)');
-        console.log('headers raw:', t?.headers);
-        if (t?.rows?.length) {
-          const r0 = t.rows[0];
-          console.log('row[0] typeof/Array?', typeof r0, Array.isArray(r0));
-          try { console.log('row[0] keys:', Object.keys(r0)); } catch {}
-          if (r0 && typeof r0 === 'object' && 'c' in r0) console.log('row[0].c len:', Array.isArray(r0.c) ? r0.c.length : typeof r0.c);
-        } else { console.warn('DEFAULT sin filas'); }
-        console.groupEnd();
-      }
-
-      const norm = normalizeDEFAULTTable(data);
-      const { headers, rows } = toHeadersRows(norm);
-
-      const incomingStyle = data.styleById || data.style || {};
-      const tableLike = {
-        fields: data.fields || {},
-        tables: { DEFAULT: { headers, rows } },
-        fieldsByConfigId: data.fieldsByConfigId || {},
-        styleById: incomingStyle || {}
-      };
-
-      drawVisualization(ensureContainer(), tableLike);
-    } catch (e) {
-      err('[Viz] Error procesando datos:', e);
-    }
-  }
-
-  async function initWrapper(attempt = 1) {
-    try {
-      const MAX_ATTEMPTS = 5;
-
-      if (window.__VIZ_SUBSCRIBED) { dbg('[Viz] initWrapper: ya suscripto, salgo.'); return; }
-
-      const d = await waitForDscc().catch(() => null);
-      if (d && typeof d.subscribeToData === 'function') {
-        dbg('[Viz] dscc listo (', d === dsccImported ? 'bundle' : 'window', ')');
-
-        if (d.objectTransform) {
-          d.subscribeToData(inspectAndRender, { transform: d.objectTransform });
-          window.__VIZ_SUBSCRIBED = true;
-        } else {
-          console.warn('[Viz] objectTransform no disponible; suscribo sin transform (no recomendado)');
-          d.subscribeToData(inspectAndRender);
-          window.__VIZ_SUBSCRIBED = true;
-        }
-
-        if (DEBUG && d.tableTransform && !window.__TAP_TT_DONE) {
-          window.__TAP_TT_DONE = true;
-          const once = (fn) => { let done = false; return (x) => { if (!done) { done = true; fn(x); } }; };
-          d.subscribeToData(
-            once((t) => {
-              console.group('[tap.tableTransform]');
-              try {
-                console.log('tables keys:', Object.keys(t?.tables || {}));
-                console.log('DEFAULT sample row:', t?.tables?.DEFAULT?.[0]);
-              } finally { console.groupEnd(); }
-            }),
-            { transform: d.tableTransform }
-          );
-        }
-
-        return;
-      }
-
-      ensureDsccScript();
-      if (attempt < MAX_ATTEMPTS) {
-        warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento en 1s…`);
-        setTimeout(() => initWrapper(attempt + 1), 1000);
-        return;
-      }
-
-      err('[Viz] dscc no disponible tras reintentos. Fallback mock.');
-      const container = ensureContainer();
-      const mockData = {
-        tables: {
-          DEFAULT: {
-            headers: [{ id: 'barrio', name: 'Barrio' }, { id: 'poblacion', name: 'Población' }],
-            rows: [
-              ['Palermo', 225000],
-              ['Recoleta', 188000],
-            ],
-          },
-        },
-        fieldsByConfigId: {
-          geoDimension: [{ id: 'barrio', name: 'Barrio' }],
-          metricPrimary: [{ id: 'poblacion', name: 'Población' }],
-        },
-        styleById: {}
-      };
-      drawVisualization(container, mockData);
-      window.__VIZ_SUBSCRIBED = 'mock';
-
-    } catch (e) { err('[Viz] Error initWrapper:', e); }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(err); });
-  } else {
-    initWrapper().catch(err);
-  }
-})();
