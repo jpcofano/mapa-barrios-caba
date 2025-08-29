@@ -647,67 +647,108 @@
     if (DEBUG) console.log('[Viz] Render OK — nivel:', nivel, 'features:', geojson?.features?.length||0);
   }
 
-  /* ------------------------------ INIT DSCC ------------------------------ */
-  async function waitForDscc(){
+  /* ====== INIT / DSCC bootstrap ====== */
+
+// Si no existe, defino un probe no-op (por si tu archivo ya lo trae)
+if (typeof probeMessage !== 'function') {
+  window.probeMessage = function(){};
+}
+
+// Debug toggle (podés activar con ?debug=1)
+const DEBUG = /[?&]debug=1\b/.test(location.search) || !!window.__DEBUG_VIZ;
+
+let __VIZ_SUBSCRIBED = false;
+
+async function waitForDscc() {
+  if (window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
+  // Poll cortito (2s total)
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 100));
     if (window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
-    // intentar script global si es necesario (bundle dscc ya suele estar)
-    for (let i=0;i<20;i++){
-      await new Promise(r => setTimeout(r, 100));
-      if (window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
-    }
-    return null;
   }
+  return null;
+}
 
-  async function initWrapper(attempt = 1) {
+function ensureContainer(){
+  let el = document.getElementById('container');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'container';
+    el.style.width = '100%';
+    el.style.height = '100%';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+// Tap opcional a tableTransform (solo si DEBUG y existe)
+let __tapOnce = false;
+function tapTableTransform(dscc) {
+  if (!DEBUG || __tapOnce || !dscc?.tableTransform) return;
+  __tapOnce = true;
+  dscc.subscribeToData((t) => {
+    console.group('[tap.tableTransform]');
     try {
-      const MAX_ATTEMPTS = 5;
-      if (window.__VIZ_SUBSCRIBED) { if (DEBUG) console.log('[Viz] ya suscripto'); return; }
+      const T = t?.tables?.DEFAULT;
+      console.log('tables keys:', Object.keys(t?.tables || {}));
+      console.log('rows len:', Array.isArray(T) ? T.length : '(no array)');
+      if (Array.isArray(T)) console.log('sample row 0:', T[0]);
+    } finally { console.groupEnd(); }
+  }, { transform: dscc.tableTransform });
+}
 
-      const d = await waitForDscc();
-      if (d && typeof d.subscribeToData === 'function') {
-        if (DEBUG) console.log('[Viz] dscc listo');
-        d.subscribeToData((data) => {
-          try { probeMessage(data, {note:'callback'}); } catch(e){}
-          try {
-            const container = ensureContainer();
-            drawVisualization(container, data);
-          } catch(e){ console.error('[Viz] render error:', e); }
-        }, { transform: d.objectTransform });
+async function initWrapper(attempt = 1) {
+  try {
+    const MAX_ATTEMPTS = 5;
+    if (__VIZ_SUBSCRIBED) { if (DEBUG) console.log('[Viz] ya suscripto'); return; }
 
-        tapTableTransform(d); // logs opcionales
-        window.__VIZ_SUBSCRIBED = true;
-        return;
-      }
+    const dscc = await waitForDscc();
+    if (dscc && typeof dscc.subscribeToData === 'function') {
+      if (DEBUG) console.log('[Viz] dscc listo');
+      dscc.subscribeToData((message) => {
+        try { window.__dsccLast = message; } catch {}
+        try { probeMessage(message, { note: 'callback' }); } catch {}
+        try {
+          const container = ensureContainer();
+          drawVisualization(container, message);
+        } catch (e) {
+          console.error('[Viz] render error:', e);
+        }
+      }, { transform: dscc.objectTransform });
 
-      if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento…`);
-        setTimeout(() => initWrapper(attempt + 1), 1000);
-        return;
-      }
-
-      console.error('[Viz] dscc no disponible tras reintentos.');
-    } catch (e) { console.error('[Viz] Error initWrapper:', e); }
-  }
-
-  function ensureContainer(){
-    let el = document.getElementById('container');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'container';
-      el.style.width = '100%';
-      el.style.height = '100%';
-      document.body.appendChild(el);
+      tapTableTransform(dscc); // opcional para ver rows crudas
+      __VIZ_SUBSCRIBED = true;
+      return;
     }
-    return el;
-  }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => { initWrapper(); });
-  } else {
-    initWrapper();
+    if (attempt < MAX_ATTEMPTS) {
+      console.warn(`[Viz] dscc no disponible (attempt ${attempt}), reintento…`);
+      setTimeout(() => initWrapper(attempt + 1), 1000);
+      return;
+    }
+    console.error('[Viz] dscc no disponible tras reintentos.');
+  } catch (e) {
+    console.error('[Viz] Error initWrapper:', e);
   }
+}
 
-  // Exponer por si necesitás llamar manualmente en consola
+// Boot
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { initWrapper(); });
+} else {
+  initWrapper();
+}
+
+// Helpers de consola
+window.__viz = {
+  forceRender: () => {
+    const m = window.__dsccLast;
+    if (!m) return console.warn('No hay snapshot todavía');
+    drawVisualization(ensureContainer(), m);
+  },
+  nivel: () => window.__lastNivel
+};
+    // Exponer por si necesitás llamar manualmente en consola
   window.__viz = { drawVisualization };
 
 })();
