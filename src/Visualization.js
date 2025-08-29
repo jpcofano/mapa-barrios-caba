@@ -335,8 +335,33 @@ const PRESET_PALETTES = {
   turbo:   ['#23171b','#3b0f70','#6a00a8','#9c179e','#bd3786','#d8576b','#ed7953','#fb9f3a','#fdca26','#f0f921'],
   Spectral:['#9e0142','#d53e4f','#f46d43','#fdae61','#fee08b','#e6f598','#abdda4','#66c2a5','#3288bd','#5e4fa2'],
   soloAmarillo: ['#FFFFF2','#FFFFE6','#FFFFCC','#FFFFB3','#FFFF99','#FFFF66','#FFFF33','#FFFF00'],
-  coolToYellow: ['#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00']
+  coolToYellow: ['#08306B','#08519C','#2171B5','#41B6C4','#7FCDBB','#C7E9B4','#FFFFCC','#FFFF66','#FFFF00'],
+  baWarm: ['#A7D5C2', '#F08372', '#EC607E','#FFC93A', '#FFD500'],
+  baCool: ['#29BDEF', '#A7D5C2', '#EC607E','#FFC93A', '#FFD500']
 };
+function getPaletteFromStyle(style = {}) {
+  // 1) Paleta personalizada por texto (#hex,#hex,...)
+  if (style.customPalette) {
+    const arr = String(style.customPalette)
+      .split(/[,\s]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+    if (arr.length) {
+      return style.invertScale ? arr.slice().reverse() : arr;
+    }
+  }
+
+  // 2) Paleta por “colorPalette / palettePreset”
+  const preset = style.colorPalette || style.palettePreset || ''; // compat
+  if (preset && PRESET_PALETTES[preset]) {
+    const base = PRESET_PALETTES[preset];
+    return style.invertScale ? base.slice().reverse() : base;
+  }
+
+  // 3) Sin paleta → null (usará escala base)
+  return null;
+}
+
 function hexToRgb(h){ const x=h.replace('#',''); return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)]; }
 function rgbToHex([r,g,b]){ const h=n=>Math.round(n).toString(16).padStart(2,'0'); return `#${h(r)}${h(g)}${h(b)}`; }
 function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
@@ -347,96 +372,94 @@ function samplePaletteContinuous(colors,t){
   const i = Math.floor(pos), f = pos - i;
   return lerpRgb(colors[i], colors[Math.min(i+1, colors.length-1)], f);
 }
-function getColorFromScaleOrPalette(t, style) {
-  let u = clamp01(t);
-  if (style?.invertScale) u = 1 - u;
-  const pal = style?.colorPalette?.colors;
-  if (Array.isArray(pal) && pal.length) return samplePaletteContinuous(pal, u);
-  return colorFromScale(style?.colorScale || 'greenToRed', u, false);
+function getColorFromScaleOrPalette(t, style = {}) {
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+  const u = clamp01(t);
+
+  // a) si hay paleta (custom o preset), muestrearla de forma continua
+  const pal = getPaletteFromStyle(style);
+  if (pal && pal.length) {
+    const idx = u * (pal.length - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.min(pal.length - 1, lo + 1);
+    const frac = idx - lo;
+    // interpolación perceptual simple entre dos colores de la paleta
+    const mix = (c1, c2, f) => {
+      const toRGB = hex => {
+        const m = hex.replace('#', '');
+        return [parseInt(m.slice(0,2),16), parseInt(m.slice(2,4),16), parseInt(m.slice(4,6),16)];
+      };
+      const [r1,g1,b1] = toRGB(pal[lo]);
+      const [r2,g2,b2] = toRGB(pal[hi]);
+      const r = Math.round(r1 + (r2 - r1) * frac);
+      const g = Math.round(g1 + (g2 - g1) * frac);
+      const b = Math.round(b1 + (b2 - b1) * frac);
+      return `rgb(${r},${g},${b})`;
+    };
+    return mix(pal[lo], pal[hi], frac);
+  }
+
+  // b) si no hay paleta, usar escala base (greenToRed, blueToYellow, etc.)
+  return colorFromScale(style.colorScale || 'greenToRed', u, /*invertAlready=*/false);
 }
+
 
 /* ============================================================================
    Estilos desde config.json
 ============================================================================ */
-function readStyle(message = {}) {
-  const s = (message && (message.styleById || message.style)) ? (message.styleById || message.style) : {};
-  const num = (x,d) => { const n = Number(x?.value ?? x); return Number.isFinite(n) ? n : d; };
-  const readColor = (node, fb) => {
-    const val = node?.value ?? node;
-    if (typeof val === 'string') return val;
-    if (val && typeof val === 'object' && typeof val.color === 'string') return val.color;
-    return fb;
+function readStyle(message) {
+  const s = (message && (message.styleById || message.style)) || {};
+  const g = (key, def) => {
+    const v = s[key];
+    if (v == null) return def;
+    if (typeof v === 'object' && 'value' in v) return v.value;
+    return v;
   };
-  const getPalette = () => {
-    const raw = (s.customPalette && s.customPalette.value ? String(s.customPalette.value) : '').trim();
-    if (raw) {
-      const colors = raw.split(',').map(x=>x.trim())
-        .filter(x=>/^#?[0-9a-f]{6}$/i.test(x)).map(x=>x.startsWith('#')?x:'#'+x);
-      if (colors.length) return { mode:'custom', colors };
-    }
-    const v = s.colorPalette && s.colorPalette.value;
-    if (v) {
-      if (typeof v === 'string') {
-        if (PRESET_PALETTES[v]) return { mode:'preset', colors: PRESET_PALETTES[v] };
-        if (/^#?[0-9a-f]{6}$/i.test(v)) return { mode:'custom', colors:[v.startsWith('#')?v:'#'+v] };
-        return { mode:'custom', colors:[] };
-      }
-      const colors = (v.colors || v.palette || v.values || []);
-      return { mode:(v.mode||'custom'), colors: Array.isArray(colors)? colors : [] };
-    }
-    return null;
+  const toNum = (x, def) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : def;
   };
 
   return {
-    // geografía
-    nivelJerarquia: (s.nivelJerarquia && s.nivelJerarquia.value) || 'barrio',
-    geojsonProperty: ((s.geojsonProperty && s.geojsonProperty.value) || '').toString().trim(),
+    // Geografía
+    nivelJerarquia: g('nivelJerarquia', 'barrio'),
 
-    // color
-    colorScale: (s.colorScale && s.colorScale.value) || 'greenToRed',
-    invertScale: !!(s.invertScale && s.invertScale.value),
-    colorPalette: getPalette(),
+    // Colores y escala
+    palettePreset: g('palettePreset', 'viridis'),
+    invertScale: !!g('invertScale', false),
+    noDataColor: g('noDataColor', '#e0e0e0'),
+    breaksMethod: g('breaksMethod', 'quantile'), // quantile | equal | jenks
+    classCount: toNum(g('classCount', '5'), 5),
 
-    // estilo shapes
-    opacity: num(s.opacity, 0.45),
-    colorMissing: readColor(s.colorMissing, '#cccccc'),
-    showLegend: (s.showLegend && s.showLegend.value !== undefined) ? !!s.showLegend.value : true,
-    legendPosition: (s.legendPosition && s.legendPosition.value) || 'bottomright',
-    showLabels: !!(s.showLabels && s.showLabels.value),
+    // Leyenda
+    legendTitle: g('legendTitle', ''),
+    legendNoDecimals: !!g('legendNoDecimals', true),
+    legendNoDataText: g('legendNoDataText', 'Sin datos'),
 
-    showBorders: (s.showBorders && s.showBorders.value !== undefined) ? !!s.showBorders.value : true,
-    borderColor: readColor(s.borderColor, '#000000'),
-    borderWidth: num(s.borderWidth, 1),
-    borderOpacity: num(s.borderOpacity, 1),
+    // Borde
+    strokeColor: g('strokeColor', '#ffffff'),
+    strokeWidth: toNum(g('strokeWidth', '1'), 1),
+    strokeOpacity: toNum(g('strokeOpacity', '0.7'), 0.7),
 
-    // tooltip/popup
-    popupFormat: (s.popupFormat && s.popupFormat.value) || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}',
-    tooltipFormat: (s.tooltipFormat && s.tooltipFormat.value) || '',
+    // Tooltip & Popup
+    tooltipTemplate: g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
+    popupTemplate: g('popupTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
 
-    // categorías (opcional 1/2/3)
-    categoryMode: !!(s.categoryMode && s.categoryMode.value),
-    cat1Label: (s.category1Label && s.category1Label.value) || 'Categoría 1',
-    cat1Value: num(s.category1Value, 1),
-    cat1Color: readColor(s.category1Color, '#F4B400'),
-    cat2Label: (s.category2Label && s.category2Label.value) || 'Categoría 2',
-    cat2Value: num(s.category2Value, 2),
-    cat2Color: readColor(s.category2Color, '#3F51B5'),
-    cat3Label: (s.category3Label && s.category3Label.value) || 'Categoría 3',
-    cat3Value: num(s.category3Value, 3),
-    cat3Color: readColor(s.category3Color, '#00ACC1'),
-    categoryOtherColor: readColor(s.categoryOtherColor, '#E0E0E0'),
+    // Branding (logo)
+    logoEnabled: !!g('logoEnabled', false),
+    logoDataUrl: g('logoDataUrl', ''),
+    logoPosition: g('logoPosition', 'br'), // tl | tr | bl | br
+    logoWidthPx: toNum(g('logoWidthPx', '128'), 128),
+    logoOpacity: toNum(g('logoOpacity', '1'), 1),
 
-    // branding
-    showLogo: (s.showLogo && s.showLogo.value !== undefined) ? !!s.showLogo.value : true,
-    logoDataUrl: ((s.logoDataUrl && s.logoDataUrl.value) || '').toString().trim(),
-    logoUrl: (s.logoUrl && s.logoUrl.value) || '',
-    logoPosition: (s.logoPosition && s.logoPosition.value) || 'bottomleft',
-    logoWidthPx: num(s.logoWidthPx, 160),
-    logoOpacity: num(s.logoOpacity, 0.9),
-    logoWidthMode: (s.logoWidthMode && s.logoWidthMode.value) || 'px',
-    logoWidthPercent: num(s.logoWidthPercent, 10)
+    // Barra de marca (opcional)
+    brandBarEnabled: !!g('brandBarEnabled', false),
+    brandBarPosition: g('brandBarPosition', 'bottom'), // top | bottom
+    brandBarHeightPct: toNum(g('brandBarHeightPct', '10'), 10), // %
+    brandBarBg: g('brandBarBg', '#FFD500')
   };
 }
+
 
 /* ============================================================================
    Propiedad de nombre por feature + clave canónica
@@ -966,6 +989,7 @@ function hostAllowedForImg(u) {
       || u.startsWith('data:');
   } catch { return false; }
 }
+
 function renderLogo(mapContainerEl, style, state) {
   if (state.logoEl) { try { state.logoEl.remove(); } catch {} state.logoEl = null; }
   if (state.logoResizeObs) { try { state.logoResizeObs.disconnect(); } catch {} state.logoResizeObs = null; }
@@ -1031,6 +1055,43 @@ function renderLogo(mapContainerEl, style, state) {
     state.logoResizeObs = ro;
   }
 }
+function renderBrandBar(mapContainerEl, style, state) {
+  // eliminar anterior
+  if (state.brandBarEl) { try { state.brandBarEl.remove(); } catch(e) {} state.brandBarEl = null; }
+
+  if (!style.brandBarEnabled) return;
+
+  const el = document.createElement('div');
+  el.className = 'ba-brandbar';
+  el.style.setProperty('--ba-bar-bg', style.brandBarBg || '#FFD500');
+
+  const sideTop = (style.brandBarPosition === 'top');
+  el.style.top = sideTop ? '0' : 'auto';
+  el.style.bottom = sideTop ? 'auto' : '0';
+
+  // altura según % del alto del mapa
+  const pct = Math.max(0, Math.min(40, Number(style.brandBarHeightPct || 10))); // clamp 0–40
+  const hPx = Math.round((mapContainerEl?.clientHeight || 600) * (pct / 100));
+  el.style.height = hPx + 'px';
+
+  // interior (zona de seguridad / contenedor)
+  const inner = document.createElement('div');
+  inner.className = 'ba-brandbar__spacer';
+  el.appendChild(inner);
+
+  mapContainerEl.appendChild(el);
+  state.brandBarEl = el;
+
+  // resize observer para recalcular alto
+  if (!state.brandBarResizeObs && 'ResizeObserver' in window) {
+    state.brandBarResizeObs = new ResizeObserver(() => {
+      if (!state.brandBarEl) return;
+      const ch = mapContainerEl?.clientHeight || 600;
+      state.brandBarEl.style.height = Math.round(ch * (pct / 100)) + 'px';
+    });
+  }
+  try { state.brandBarResizeObs?.observe(mapContainerEl); } catch {}
+}
 
 /* ============================================================================
    Param: leer 'param_nivel' o similares del mensaje
@@ -1074,6 +1135,15 @@ export default function drawVisualization(container, message = {}) {
 
   const style  = readStyle(message);
 
+  // Paleta desde estilo (C)
+  const palette = getPaletteFromStyle(style);
+  const colorFromT = (t) => {
+    const P = Array.isArray(palette) ? palette : ['#ccc','#333'];
+    const clamped = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0));
+    const idx = Math.max(0, Math.min(P.length - 1, Math.round(clamped * (P.length - 1))));
+    return P[idx];
+  };
+
   // Resolvemos índices de dimensión/métrica (ignora param_nivel y evita extras)
   const idx = resolveIndices(message);
 
@@ -1099,23 +1169,22 @@ export default function drawVisualization(container, message = {}) {
   }
 
   // Valor por polígono (SUM met) + lookup por texto — ambas usando clave CANÓNICA según nivel
-const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
-const rowLookup = buildRowLookup(message, idx.dim, nivel);
+  const stats     = buildValueMap(message, idx.dim, idx.metric, nivel);
+  const rowLookup = buildRowLookup(message, idx.dim, nivel);
 
-// rank solo con lo que REALMENTE se pinta (claves que matchean features del geojson activo)
-const paintedVals = [];
-for (const f of (geojson?.features || [])) {
-  const key = getFeatureKey(f, nivel, style.geojsonProperty);
-  const val = stats.map.get(key);
-  if (Number.isFinite(val)) paintedVals.push(val);
-}
-const rankCtx = makeRankCtx(paintedVals, { highIsOne: true });
+  // rank solo con lo que REALMENTE se pinta (claves que matchean features del geojson activo)
+  const paintedVals = [];
+  for (const f of (geojson?.features || [])) {
+    const key = getFeatureKey(f, nivel, style.geojsonProperty);
+    const val = stats.map.get(key);
+    if (Number.isFinite(val)) paintedVals.push(val);
+  }
+  const rankCtx = makeRankCtx(paintedVals, { highIsOne: true });
 
-// (opcional) debug rápido
-if (DEBUG) {
-  console.log('[rank] mapSize:', stats.map.size, 'painted:', paintedVals.length);
-}
-
+  // (opcional) debug rápido
+  if (DEBUG) {
+    console.log('[rank] mapSize:', stats.map.size, 'painted:', paintedVals.length);
+  }
 
   // Categorías automáticas si valores ∈ {1,2,3}
   const uniqVals = new Set();
@@ -1151,7 +1220,7 @@ if (DEBUG) {
       else                            fillColor = style.categoryOtherColor || style.colorMissing;
     } else if (stats.count && Number.isFinite(v)) {
       const t = (v - stats.min) / ((stats.max - stats.min) || 1);
-      fillColor = getColorFromScaleOrPalette(t, style);
+      fillColor = colorFromT(t); // ← usa paleta del estilo
     } else {
       fillColor = style.colorMissing;
     }
@@ -1203,73 +1272,117 @@ if (DEBUG) {
   } catch (e) { warn('[Viz] No se pudo ajustar bounds:', e); }
 
   // leyenda
-  if (style.showLegend) {
-    const legend = L.control({ position: style.legendPosition || 'bottomright' });
-    legend.onAdd = () => {
-      const div = L.DomUtil.create('div', 'legend');
-      try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch {}
-      Object.assign(div.style, {
-        background: 'rgba(255,255,255,.9)',
-        padding: '8px 10px',
-        borderRadius: '8px',
-        boxShadow: '0 1px 4px rgba(0,0,0,.25)',
-        font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-      });
+ if (style.showLegend) {
+  const legend = L.control({ position: style.legendPosition || 'bottomright' });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'legend');
+    try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch {}
+    Object.assign(div.style, {
+      background: 'rgba(255,255,255,.9)',
+      padding: '8px 10px',
+      borderRadius: '8px',
+      boxShadow: '0 1px 4px rgba(0,0,0,.25)',
+      font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+    });
 
-      if (categoryModeActive) {
-        const entries = [
-          { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
-          { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
-          { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
-          { col: style.categoryOtherColor, lbl: 'Otros' }
-        ];
-        for (const e of entries) {
-          const row = document.createElement('div');
-          row.style.display = 'flex'; row.style.alignItems = 'center'; row.style.gap = '8px'; row.style.margin = '2px 0';
-          const sw = document.createElement('span');
-          sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
-          sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=e.col;
-          const label = document.createElement('span');
-          label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
-          row.appendChild(sw); row.appendChild(label); div.appendChild(row);
-        }
-        return div;
-      }
-
-      if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
-        div.textContent = 'Sin datos'; return div;
-      }
-      const breaks = 5;
-      const fmt0 = (x) => Number.isFinite(x) ? Math.round(x).toLocaleString('es-AR') : 's/d';
-      for (let i = 0; i < breaks; i++) {
-        const a = stats.min + (stats.max - stats.min) * (i / breaks);
-        const b = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
-        const mid = (a + b) / 2;
-        const t = (mid - stats.min) / ((stats.max - stats.min) || 1);
-        const col = getColorFromScaleOrPalette(t, style);
-
+    // Leyenda categórica (si corresponde)
+    if (categoryModeActive) {
+      const entries = [
+        { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
+        { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
+        { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
+        { col: style.categoryOtherColor, lbl: 'Otros' }
+      ];
+      for (const e of entries) {
         const row = document.createElement('div');
-        row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='2px 0';
-
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+        row.style.margin = '2px 0';
         const sw = document.createElement('span');
-        sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
-        sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=col;
-
+        sw.style.display = 'inline-block';
+        sw.style.width = '14px';
+        sw.style.height = '14px';
+        sw.style.border = '1px solid rgba(0,0,0,.2)';
+        sw.style.background = e.col;
         const label = document.createElement('span');
-        label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
-
-        row.appendChild(sw); row.appendChild(label); div.appendChild(row);
+        label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
+        row.appendChild(sw);
+        row.appendChild(label);
+        div.appendChild(row);
       }
       return div;
+    }
+
+    // Leyenda continua
+    if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
+      div.textContent = 'Sin datos';
+      return div;
+    }
+
+    const breaks = Number(style.classCount) || 5;
+    const fmt0 = (x) => {
+      if (!Number.isFinite(x)) return 's/d';
+      return style.legendNoDecimals
+        ? Math.round(x).toLocaleString('es-AR')
+        : x.toLocaleString('es-AR', { maximumFractionDigits: 2 });
     };
-    legend.addTo(map);
-    __leafletState.legend = legend;
-  }
 
-  // logo
-  renderLogo(map.getContainer(), style, __leafletState);
+    for (let i = 0; i < breaks; i++) {
+      const a   = stats.min + (stats.max - stats.min) * (i / breaks);
+      const b   = stats.min + (stats.max - stats.min) * ((i + 1) / breaks);
+      const mid = (a + b) / 2;
 
-  if (DEBUG) dbg('[Viz] Render OK — features:', geojson?.features?.length || 0);
+      // color en la leyenda usando la MISMA función que el mapa
+      const u   = (mid - stats.min) / ((stats.max - stats.min) || 1);
+      const col = getColorFromScaleOrPalette(u, style);
+
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '8px';
+      row.style.margin = '2px 0';
+
+      const sw = document.createElement('span');
+      sw.style.display = 'inline-block';
+      sw.style.width = '14px';
+      sw.style.height = '14px';
+      sw.style.border = '1px solid rgba(0,0,0,.2)';
+      sw.style.background = col;
+
+      const label = document.createElement('span');
+      label.textContent = `${fmt0(a)} – ${fmt0(b)}`;
+
+      row.appendChild(sw);
+      row.appendChild(label);
+      div.appendChild(row);
+    }
+
+    // (Opcional) muestra “Sin datos”
+    if (style.legendNoDataText) {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.gap = '8px';
+      row.style.margin = '6px 0 0';
+      const sw = document.createElement('span');
+      sw.style.display = 'inline-block';
+      sw.style.width = '14px';
+      sw.style.height = '14px';
+      sw.style.border = '1px solid rgba(0,0,0,.2)';
+      sw.style.background = style.noDataColor || '#e0e0e0';
+      const label = document.createElement('span');
+      label.textContent = style.legendNoDataText;
+      row.appendChild(sw);
+      row.appendChild(label);
+      div.appendChild(row);
+    }
+
+    return div;
+  }; // ← cerramos onAdd
+
+  legend.addTo(map);
+  __leafletState.legend = legend;
 }
 
 /* ============================================================================

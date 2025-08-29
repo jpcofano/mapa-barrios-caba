@@ -214,3 +214,23 @@ img[alt="Logo"]{
   .leaflet-control{ box-shadow:none; background:#fff; border-color:#bbb; }
   .leaflet-tooltip{ box-shadow:none; background:#fff; border-color:#bbb; }
 }
+
+/* === Barra de marca BA (opcional) === */
+.ba-brandbar {
+  position: absolute;
+  left: 0; right: 0;
+  background: var(--ba-bar-bg, #FFD500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none; /* no bloquea el mapa */
+  z-index: 400; /* por encima del mapa, debajo de tooltips */
+}
+
+.ba-brandbar__spacer {
+  height: 100%;
+  width: 100%;
+  max-width: 1200px; /* opcional, contenedor */
+  display: flex; align-items: center; justify-content: center;
+  padding: 4px 8px;
+}
