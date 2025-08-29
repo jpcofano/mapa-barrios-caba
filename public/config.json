@@ -151,9 +151,9 @@
           "label": "Posición",
           "type": "SELECT_SINGLE",
           "options": [
-            { "label": "Abajo derecha",  "value": "bottomright" },
-            { "label": "Abajo izquierda","value": "bottomleft" },
-            { "label": "Arriba derecha", "value": "topright" },
+            { "label": "Abajo derecha",   "value": "bottomright" },
+            { "label": "Abajo izquierda", "value": "bottomleft" },
+            { "label": "Arriba derecha",  "value": "topright" },
             { "label": "Arriba izquierda","value": "topleft" }
           ],
           "defaultValue": "bottomright"
@@ -172,6 +172,7 @@
         }
       ]
     },
+
     {
       "id": "labels",
       "label": "Etiquetas / Popup",
@@ -201,17 +202,17 @@
       "id": "categories",
       "label": "Modo por categorías (1–3)",
       "elements": [
-        { "id": "categoryMode",       "label": "Activar modo por categorías", "type": "CHECKBOX",    "defaultValue": false },
-        { "id": "cat1Value",          "label": "Valor categoría 1",           "type": "INPUT_NUMBER","defaultValue": 1 },
-        { "id": "cat1Color",          "label": "Color categoría 1",           "type": "FILL_COLOR",  "defaultValue": "#f3c300" },
-        { "id": "cat1Label",          "label": "Etiqueta cat. 1",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 1" },
-        { "id": "cat2Value",          "label": "Valor categoría 2",           "type": "INPUT_NUMBER","defaultValue": 2 },
-        { "id": "cat2Color",          "label": "Color categoría 2",           "type": "FILL_COLOR",  "defaultValue": "#4e79a7" },
-        { "id": "cat2Label",          "label": "Etiqueta cat. 2",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 2" },
-        { "id": "cat3Value",          "label": "Valor categoría 3",           "type": "INPUT_NUMBER","defaultValue": 3 },
-        { "id": "cat3Color",          "label": "Color categoría 3",           "type": "FILL_COLOR",  "defaultValue": "#59a14f" },
-        { "id": "cat3Label",          "label": "Etiqueta cat. 3",             "type": "INPUT_TEXT",  "defaultValue": "Categoría 3" },
-        { "id": "categoryOtherColor", "label": "Color \"Otros\"",              "type": "FILL_COLOR",  "defaultValue": "#cccccc" }
+        { "id": "categoryMode",       "label": "Activar modo por categorías", "type": "CHECKBOX",     "defaultValue": false },
+        { "id": "cat1Value",          "label": "Valor categoría 1",           "type": "INPUT_NUMBER", "defaultValue": 1 },
+        { "id": "cat1Color",          "label": "Color categoría 1",           "type": "FILL_COLOR",   "defaultValue": "#f3c300" },
+        { "id": "cat1Label",          "label": "Etiqueta cat. 1",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 1" },
+        { "id": "cat2Value",          "label": "Valor categoría 2",           "type": "INPUT_NUMBER", "defaultValue": 2 },
+        { "id": "cat2Color",          "label": "Color categoría 2",           "type": "FILL_COLOR",   "defaultValue": "#4e79a7" },
+        { "id": "cat2Label",          "label": "Etiqueta cat. 2",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 2" },
+        { "id": "cat3Value",          "label": "Valor categoría 3",           "type": "INPUT_NUMBER", "defaultValue": 3 },
+        { "id": "cat3Color",          "label": "Color categoría 3",           "type": "FILL_COLOR",   "defaultValue": "#59a14f" },
+        { "id": "cat3Label",          "label": "Etiqueta cat. 3",             "type": "INPUT_TEXT",   "defaultValue": "Categoría 3" },
+        { "id": "categoryOtherColor", "label": "Color \"Otros\"",              "type": "FILL_COLOR",   "defaultValue": "#cccccc" }
       ]
     },
 
