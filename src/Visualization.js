@@ -655,7 +655,7 @@ if (typeof probeMessage !== 'function') {
 }
 
 // Debug toggle (podés activar con ?debug=1)
-const DEBUG = /[?&]debug=1\b/.test(location.search) || !!window.__DEBUG_VIZ;
+//const DEBUG = /[?&]debug=1\b/.test(location.search) || !!window.__DEBUG_VIZ;
 
 let __VIZ_SUBSCRIBED = false;
 
