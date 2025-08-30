@@ -124,6 +124,7 @@
 
       showLegend: !!pick('showLegend', true),
       legendPosition: pick('legendPosition','bottomright'),
+      legendBreaks: Number(pick('legendBreaks', 5)),       // ← NUEVO
       legendNoDecimals: !!pick('legendNoDecimals', true),
       legendNoDataText: pick('legendNoDataText', 'Sin datos'),
 
@@ -207,47 +208,55 @@
   }
 
   /* ----------------------------- Datos ---------------------------------- */
-  function buildValueMap(message, dimIdx, metIdx){
-    const H = message?.tables?.DEFAULT?.headers || [];
-    const R = message?.tables?.DEFAULT?.rows || [];
-    const map = new Map();
-    let min=+Infinity, max=-Infinity, count=0;
+function buildValueMap(message, dimIdx, metIdx){
+  const H = message?.tables?.DEFAULT?.headers || [];
+  const R = message?.tables?.DEFAULT?.rows || [];
+  const sums = new Map();
 
-    for (const row of R){
-      const key = canonicalKey(row[dimIdx]);
-      const v = toNumberLoose(row[metIdx]);
-      if (Number.isFinite(v)){
-        const prev = map.get(key) || 0;
-        const sum = prev + v;
-        map.set(key, sum);
-        min = Math.min(min, sum);
-        max = Math.max(max, sum);
-        count++;
-      }
+  for (const row of R){
+    const key = canonicalKey(row[dimIdx]);
+    const v = toNumberLoose(row[metIdx]);
+    if (Number.isFinite(v)){
+      sums.set(key, (sums.get(key) || 0) + v);
     }
-    if (!count){ min = NaN; max = NaN; }
-    return { map, min, max, count, headers:H };
   }
 
-  function buildRowLookup(message, dimIdx){
-    const R = message?.tables?.DEFAULT?.rows || [];
-    const H = message?.tables?.DEFAULT?.headers || [];
-    const map = new Map();
-    for (const row of R){
-      const name = String(row[dimIdx] ?? '');
-      const byName = {};
-      const byId = {};
-      for (let i=0;i<H.length;i++){
-        const id = String(H[i]?.id ?? `col${i+1}`);
-        const nm = String(H[i]?.name ?? id);
-        byId[id] = row[i];
-        byName[nm] = row[i];
-        byName[`col${i+1}`] = row[i]; // accesos col1/col2...
-      }
-      map.set(name, { __raw: row, byName, byId });
+  let min = +Infinity, max = -Infinity, count = 0;
+  for (const total of sums.values()){
+    if (Number.isFinite(total)){
+      min = Math.min(min, total);
+      max = Math.max(max, total);
+      count++;
     }
-    return map;
   }
+  if (!count){ min = NaN; max = NaN; }
+
+  return { map: sums, min, max, count, headers: H };
+}
+
+
+function buildRowLookup(message, dimIdx){
+  const R = message?.tables?.DEFAULT?.rows || [];
+  const H = message?.tables?.DEFAULT?.headers || [];
+  const map = new Map();
+  for (const row of R){
+    const name = String(row[dimIdx] ?? '');
+    const canon = canonicalKey(name);
+    const byName = {}, byId = {};
+    for (let i=0;i<H.length;i++){
+      const id = String(H[i]?.id ?? `col${i+1}`);
+      const nm = String(H[i]?.name ?? id);
+      byId[id] = row[i];
+      byName[nm] = row[i];
+      byName[`col${i+1}`] = row[i];
+    }
+    const payload = { __raw: row, byName, byId };
+    map.set(name, payload);
+    map.set(canon, payload); // 🔸 también por clave canónica
+  }
+  return map;
+}
+
 
   /* ------------------------- Ranking (1 = mayor) ------------------------- */
   function makeRankCtx(values, { highIsOne = true } = {}){
@@ -522,7 +531,8 @@
         const nombreLabel = getFeatureNameProp(feature, nivel, style.geojsonProperty) ?? '—';
         const key         = getFeatureKey(feature, nivel, style.geojsonProperty);
         const v           = stats.map.get(key);
-        const rowByName   = rowLookup.get(nombreLabel);
+        const rowByName = rowLookup.get(nombreLabel) || rowLookup.get(canonicalKey(nombreLabel));
+
 
         const popupTpl   = style.popupFormat || '<strong>{{nombre}}</strong><br/>Valor: {{valor}}';
         const tooltipTpl = (style.tooltipFormat && style.tooltipFormat.trim()) ? style.tooltipFormat : popupTpl;
@@ -597,7 +607,8 @@
           return div;
         }
 
-        const breaks = 5;
+        const nRaw = Number(style.legendBreaks);
+        const breaks = Number.isFinite(nRaw) ? Math.max(1, Math.min(12, Math.round(nRaw))) : 5;
         const fmt = (x) => {
           if (!Number.isFinite(x)) return 's/d';
           if (style.legendNoDecimals) return Math.round(x).toLocaleString('es-AR');
@@ -681,21 +692,6 @@ function ensureContainer(){
   return el;
 }
 
-// Tap opcional a tableTransform (solo si DEBUG y existe)
-let __tapOnce = false;
-function tapTableTransform(dscc) {
-  if (!DEBUG || __tapOnce || !dscc?.tableTransform) return;
-  __tapOnce = true;
-  dscc.subscribeToData((t) => {
-    console.group('[tap.tableTransform]');
-    try {
-      const T = t?.tables?.DEFAULT;
-      console.log('tables keys:', Object.keys(t?.tables || {}));
-      console.log('rows len:', Array.isArray(T) ? T.length : '(no array)');
-      if (Array.isArray(T)) console.log('sample row 0:', T[0]);
-    } finally { console.groupEnd(); }
-  }, { transform: dscc.tableTransform });
-}
 
 async function initWrapper(attempt = 1) {
   try {
@@ -748,7 +744,5 @@ window.__viz = {
   },
   nivel: () => window.__lastNivel
 };
-    // Exponer por si necesitás llamar manualmente en consola
-  window.__viz = { drawVisualization };
 
 })();
