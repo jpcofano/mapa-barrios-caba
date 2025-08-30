@@ -759,17 +759,50 @@ function ensureContainer(){
   }
   return el;
 }
+// --- NUEVO: cargar dscc si no existe ---
+function ensureDsccScript() {
+  if (window.dscc || window.__DSCC_LOADING) return;
+  window.__DSCC_LOADING = true;
+  const s = document.createElement('script');
+  // versión estable conocida del bundle
+  s.src = 'https://unpkg.com/@google/dscc@1.3.0/dist/dscc.min.js';
+  s.async = true;
+  s.onload = () => { if (DEBUG) console.log('[Viz] dscc bundle cargado'); };
+  s.onerror = () => { console.warn('[Viz] no se pudo cargar dscc'); };
+  document.head.appendChild(s);
+}
 
+async function waitForDsccWithBackoff(maxMs = 5000) {
+  const start = Date.now();
+  let delay = 100;
+  while (Date.now() - start < maxMs) {
+    if (window.dscc && typeof window.dscc.subscribeToData === 'function') return window.dscc;
+    await new Promise(r => setTimeout(r, delay));
+    delay = Math.min(500, delay + 100);
+  }
+  return null;
+}
 
+// === INIT / SUBSCRIBE ===
 async function initWrapper(attempt = 1) {
   try {
-    const MAX_ATTEMPTS = 5;
-    if (__VIZ_SUBSCRIBED) { if (DEBUG) console.log('[Viz] ya suscripto'); return; }
+    const MAX_ATTEMPTS = 6;
+    if (window.__VIZ_SUBSCRIBED) {
+      if (DEBUG) console.log('[Viz] ya suscripto');
+      return;
+    }
 
-    const dscc = await waitForDscc();
-    if (dscc && typeof dscc.subscribeToData === 'function') {
+    // Intento tomar dscc del host; si no, lo cargo y espero
+    let d = (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc : null;
+    if (!d) {
+      ensureDsccScript();                        // carga el bundle si falta
+      d = await waitForDsccWithBackoff(5000);    // espera con backoff
+    }
+
+    if (d && typeof d.subscribeToData === 'function') {
       if (DEBUG) console.log('[Viz] dscc listo');
-      dscc.subscribeToData((message) => {
+
+      d.subscribeToData((message) => {
         try { window.__dsccLast = message; } catch {}
         try { probeMessage(message, { note: 'callback' }); } catch {}
         try {
@@ -778,10 +811,10 @@ async function initWrapper(attempt = 1) {
         } catch (e) {
           console.error('[Viz] render error:', e);
         }
-      }, { transform: dscc.objectTransform });
+      }, { transform: d.objectTransform });
 
-      tapTableTransform(dscc); // opcional para ver rows crudas
-      __VIZ_SUBSCRIBED = true;
+      try { tapTableTransform(d); } catch {}  // opcional (debug tableTransform)
+      window.__VIZ_SUBSCRIBED = true;
       return;
     }
 
@@ -796,21 +829,23 @@ async function initWrapper(attempt = 1) {
   }
 }
 
-// Boot
+// === BOOT ===
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => { initWrapper(); });
+  document.addEventListener('DOMContentLoaded', () => { initWrapper().catch(() => {}); });
 } else {
-  initWrapper();
+  initWrapper().catch(() => {});
 }
 
-// Helpers de consola
-window.__viz = {
+// === Helpers de consola ===
+window.__viz = Object.assign(window.__viz || {}, {
   forceRender: () => {
     const m = window.__dsccLast;
     if (!m) return console.warn('No hay snapshot todavía');
     drawVisualization(ensureContainer(), m);
   },
   nivel: () => window.__lastNivel
-};
+});
 
+// (fin del IIFE)
 })();
+
