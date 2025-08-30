@@ -79,6 +79,9 @@
   /* ----------------------------- Utils ---------------------------------- */
   const __leafletState = { map: null, layer: null, legend: null, logo: null };
 
+  function hexToRgb(h){ const x=h.replace('#',''); return [parseInt(x.slice(0,2),16),parseInt(x.slice(2,4),16),parseInt(x.slice(4,6),16)]; }
+  function rgbToHex([r,g,b]){ const h=n=>Math.round(n).toString(16).padStart(2,'0'); return `#${h(r)}${h(g)}${h(b)}`; }
+  function lerpRgb(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
   function clamp01(x){ return Math.max(0, Math.min(1, Number(x))); }
   function lerp(a,b,t){ return a + (b-a)*t; }
   function luminance(hex){
@@ -101,58 +104,111 @@
   function fmtInt(n){ return Number.isFinite(n) ? Math.round(n).toLocaleString('es-AR') : 's/d'; }
 
   /* ------------------------ Lectura de estilo ---------------------------- */
-  function readStyle(msg){
-    const s = (msg?.styleById || msg?.style || {});
-    const pick = (id, def) => {
-      const v = s[id];
-      if (v && typeof v === 'object' && 'value' in v) return v.value;
-      return (v != null) ? v : def;
-    };
-    const out = {
-      nivelJerarquia: pick('nivelJerarquia', 'barrio'),
-      geojsonProperty: pick('geojsonProperty',''),
 
-      palettePreset: pick('palettePreset','viridis'),
-      invertScale: !!pick('invertScale', false),
-      colorMissing: pick('noDataColor', '#d9d9d9'),
-      fillOpacity: Number(pick('opacity', 0.75)),
-
-      showBorders: !!pick('showBorders', true),
-      borderColor: pick('borderColor','auto'),
-      borderWidth: Number(pick('borderWidth',1)),
-      borderOpacity: Number(pick('borderOpacity',0.7)),
-
-      showLegend: !!pick('showLegend', true),
-      legendPosition: pick('legendPosition','bottomright'),
-      legendBreaks: Number(pick('legendBreaks', 5)),       // ← NUEVO
-      legendNoDecimals: !!pick('legendNoDecimals', true),
-      legendNoDataText: pick('legendNoDataText', 'Sin datos'),
-
-      showLabels: !!pick('showLabels', true),
-      tooltipFormat: pick('tooltipFormat', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
-      popupFormat: pick('popupFormat', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}'),
-
-      categoryMode: !!pick('categoryMode', false),
-      cat1Value: toNumberLoose(pick('cat1Value',1)),
-      cat1Color: pick('cat1Color','#f3c300'),
-      cat1Label: pick('cat1Label','Categoría 1'),
-      cat2Value: toNumberLoose(pick('cat2Value',2)),
-      cat2Color: pick('cat2Color','#4e79a7'),
-      cat2Label: pick('cat2Label','Categoría 2'),
-      cat3Value: toNumberLoose(pick('cat3Value',3)),
-      cat3Color: pick('cat3Color','#59a14f'),
-      cat3Label: pick('cat3Label','Categoría 3'),
-      categoryOtherColor: pick('categoryOtherColor','#cccccc'),
-
-      logoEnabled: !!pick('logoEnabled', false),
-      logoDataUrl: pick('logoDataUrl',''),
-      logoWidthPx: Number(pick('logoWidthPx',128)),
-      logoOpacity: Number(pick('logoOpacity',1)),
-      logoPosition: pick('logoPosition','bottomright')
-    };
-    try{ window.__lastStyle = out; }catch(e){}
-    return out;
+function getPaletteFromStyle(style) {
+  // 1) paleta libre (Color Palette control)
+  if (Array.isArray(style?.colorPalette?.colors) && style.colorPalette.colors.length) {
+    return style.colorPalette.colors;
   }
+  // 2) preset por id
+  const key = style?.palettePreset || 'viridis';
+  const base = PRESET_PALETTES[key] || PRESET_PALETTES.viridis;
+  return style?.invertScale ? [...base].reverse() : base;
+}
+
+function colorFromScale(name, t, invert){
+  const u = invert ? 1 - clamp01(t) : clamp01(t);
+  // verdes→amarillos→rojos por defecto, por compat
+  const ramp = ['#00b050','#7fca4d','#c9df3f','#ffe480','#ffb14e','#ff595e'];
+  const pos = u * (ramp.length - 1);
+  const i = Math.floor(pos), f = pos - i;
+  return lerpRgb(ramp[i], ramp[Math.min(i+1, ramp.length-1)], f);
+}
+
+function getColorFromScaleOrPalette(t, style = {}) {
+  let u = clamp01(t);
+  if (style.invertScale) u = 1 - u;
+  const pal = getPaletteFromStyle(style);
+  if (pal && pal.length) {
+    const pos = u * (pal.length - 1);
+    const i = Math.floor(pos), f = pos - i;
+    return lerpRgb(pal[i], pal[Math.min(i+1, pal.length-1)], f);
+  }
+  return colorFromScale(style.colorScale || 'greenToRed', u, /*invert=*/false);
+}
+
+/* ============================================================================
+   Estilos desde config.json — compat con nombres “viejos” y “nuevos”
+============================================================================ */
+function readStyle(message) {
+  const s = (message && (message.styleById || message.style)) || {};
+  const g = (key, def) => {
+    const v = s[key];
+    if (v == null) return def;
+    if (typeof v === 'object' && 'value' in v) return v.value;
+    return v;
+  };
+  const toNum = (x, def) => { const n = Number(x); return Number.isFinite(n) ? n : def; };
+  const toBool = (x, def=false) => {
+    if (typeof x === 'boolean') return x;
+    if (x == null) return def;
+    return String(x).toLowerCase() === 'true';
+  };
+
+  return {
+    // Geografía
+    nivelJerarquia: g('nivelJerarquia', 'barrio'),
+    geojsonProperty: g('geojsonProperty', ''),
+
+    // Paleta / escala
+    palettePreset: g('palettePreset', 'viridis'),
+    customPalette: g('customPalette', ''),
+    colorScale: g('colorScale', 'greenToRed'),
+    invertScale: toBool(g('invertScale', false)),
+    colorPalette: g('colorPalette', null), // si usás control de paleta (array de colores)
+
+    // Leyenda
+    classCount: toNum(g('legendBreaks', g('classCount', '5')), 5), // acepta ambos ids
+    legendNoDecimals: toBool(g('legendNoDecimals', true), true),
+    legendNoDataText: g('legendNoDataText', 'Sin datos'),
+    legendPosition: g('legendPosition', 'bottomright'),
+    showLegend: toBool(g('showLegend', true), true),
+
+    // Borde / relleno (mapea ambos nombres)
+    showBorders: toBool(g('showBorders', true), true),
+    borderColor: g('borderColor', g('strokeColor', '#9e9e9e')),
+    borderWidth: toNum(g('borderWidth', g('strokeWidth', '1')), 1),
+    borderOpacity: toNum(g('borderOpacity', g('strokeOpacity', '1')), 1),
+    fillOpacity: toNum(g('fillOpacity', g('opacity', '0.85')), 0.85),
+
+    // No data
+    colorMissing: g('colorMissing', g('noDataColor', '#e0e0e0')),
+
+    // Categorización (opcional)
+    categoryMode: toBool(g('categoryMode', false), false),
+    cat1Value: toNum(g('cat1Value','1'), 1),
+    cat2Value: toNum(g('cat2Value','2'), 2),
+    cat3Value: toNum(g('cat3Value','3'), 3),
+    cat1Color: g('cat1Color','#1b9e77'),
+    cat2Color: g('cat2Color','#d95f02'),
+    cat3Color: g('cat3Color','#7570b3'),
+    categoryOtherColor: g('categoryOtherColor','#bdbdbd'),
+
+    // Tooltip & Popup
+    showLabels: toBool(g('showLabels', true), true),
+    tooltipFormat: g('tooltipFormat', g('tooltipTemplate','<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+    popupFormat:   g('popupFormat',   g('popupTemplate',  '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+
+    // Logo / branding
+    logoEnabled: toBool(g('logoEnabled', false), false),
+    logoDataUrl: g('logoDataUrl', ''),
+    logoPosition: g('logoPosition', 'bottomleft'),
+    logoWidthMode: g('logoWidthMode', 'px'), // 'px' | '%'
+    logoWidthPx: toNum(g('logoWidthPx', '160'), 160),
+    logoWidthPercent: toNum(g('logoWidthPercent', '20'), 20),
+    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9),
+  };
+}
 
   /* --------------- Índices DIM/MET: ignorar param_nivel ----------------- */
   function resolveIndices(message){
@@ -277,27 +333,6 @@ function buildRowLookup(message, dimIdx){
     return { N, rankOf, percentileOf };
   }
 
-  /* -------------------- Color continuo según paleta ---------------------- */
-  function getColorFromScaleOrPalette(t, style){
-    const arr = PRESET_PALETTES[style.palettePreset] || PRESET_PALETTES.viridis;
-    const tt = clamp01(style.invertScale ? 1 - t : t);
-    const n = arr.length;
-    if (n <= 1) return arr[0] || '#cccccc';
-    const idx = tt*(n-1);
-    const i0 = Math.floor(idx);
-    const i1 = Math.min(n-1, i0+1);
-    const frac = idx - i0;
-    const toRGB = (hex)=>({
-      r: parseInt(hex.slice(1,3),16),
-      g: parseInt(hex.slice(3,5),16),
-      b: parseInt(hex.slice(5,7),16)
-    });
-    const a = toRGB(arr[i0]), b = toRGB(arr[i1]);
-    const r = Math.round(lerp(a.r,b.r,frac)).toString(16).padStart(2,'0');
-    const g = Math.round(lerp(a.g,b.g,frac)).toString(16).padStart(2,'0');
-    const bl= Math.round(lerp(a.b,b.b,frac)).toString(16).padStart(2,'0');
-    return `#${r}${g}${bl}`;
-  }
 
   /* ------------------------------- Logo ---------------------------------- */
   function renderLogo(container, style, state){
@@ -560,11 +595,15 @@ function buildRowLookup(message, dimIdx){
     } catch (e) { /* noop */ }
 
     // Leyenda
-    if (style.showLegend) {
+  if (style.showLegend) {
       const legend = L.control({ position: style.legendPosition || 'bottomright' });
       legend.onAdd = () => {
         const div = L.DomUtil.create('div', 'legend');
-        try { L.DomEvent.disableClickPropagation(div); L.DomEvent.disableScrollPropagation(div); } catch(e){}
+        try {
+          L.DomEvent.disableClickPropagation(div);
+          L.DomEvent.disableScrollPropagation(div);
+        } catch (e) {}
+
         Object.assign(div.style, {
           background: 'rgba(255,255,255,.9)',
           padding: '8px 10px',
@@ -573,46 +612,55 @@ function buildRowLookup(message, dimIdx){
           font: '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
         });
 
+        // --- Modo categorías (1–3) ---
         if (categoryModeActive) {
           const entries = [
-            { col: style.cat1Color, lbl: style.cat1Label, val: style.cat1Value },
-            { col: style.cat2Color, lbl: style.cat2Label, val: style.cat2Value },
-            { col: style.cat3Color, lbl: style.cat3Label, val: style.cat3Value },
-            { col: style.categoryOtherColor, lbl: 'Otros' }
+            { col: style.cat1Color, lbl: style.cat1Label || 'Categoría 1', val: style.cat1Value },
+            { col: style.cat2Color, lbl: style.cat2Label || 'Categoría 2', val: style.cat2Value },
+            { col: style.cat3Color, lbl: style.cat3Label || 'Categoría 3', val: style.cat3Value },
+            { col: style.categoryOtherColor, lbl: style.legendNoDataText || 'Sin datos' }
           ];
           for (const e of entries) {
             const row = document.createElement('div');
-            row.style.display = 'flex'; row.style.alignItems = 'center'; row.style.gap = '8px'; row.style.margin = '2px 0';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '8px';
+            row.style.margin = '2px 0';
+
             const sw = document.createElement('span');
-            sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
-            sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=e.col;
+            sw.style.display = 'inline-block';
+            sw.style.width = '14px';
+            sw.style.height = '14px';
+            sw.style.border = '1px solid rgba(0,0,0,.2)';
+            sw.style.background = e.col;
+
             const label = document.createElement('span');
             label.textContent = e.lbl + (typeof e.val === 'number' ? ` (=${e.val})` : '');
-            row.appendChild(sw); row.appendChild(label); div.appendChild(row);
+
+            row.appendChild(sw);
+            row.appendChild(label);
+            div.appendChild(row);
           }
-          // Sin datos
-          const ndRow = document.createElement('div');
-          ndRow.style.display='flex'; ndRow.style.alignItems='center'; ndRow.style.gap='8px'; ndRow.style.margin='2px 0';
-          const ndSw = document.createElement('span');
-          ndSw.style.display='inline-block'; ndSw.style.width='14px'; ndSw.style.height='14px';
-          ndSw.style.border='1px solid rgba(0,0,0,.2)'; ndSw.style.background = style.colorMissing;
-          const ndLabel = document.createElement('span');
-          ndLabel.textContent = style.legendNoDataText || 'Sin datos';
-          ndRow.appendChild(ndSw); ndRow.appendChild(ndLabel); div.appendChild(ndRow);
           return div;
         }
 
+        // --- Continua (gradiente) ---
         if (!stats || !Number.isFinite(stats.min) || !Number.isFinite(stats.max) || !stats.count) {
           div.textContent = 'Sin datos';
           return div;
         }
 
-        const nRaw = Number(style.legendBreaks);
-        const breaks = Number.isFinite(nRaw) ? Math.max(1, Math.min(12, Math.round(nRaw))) : 5;
+        // Usa classCount (si lo expone readStyle) o legendBreaks, con clamp 1..12
+        const breaksRaw = Number(
+          (style.classCount != null ? style.classCount : style.legendBreaks)
+        );
+        const breaks = Number.isFinite(breaksRaw) ? Math.max(1, Math.min(12, Math.round(breaksRaw))) : 5;
+
         const fmt = (x) => {
           if (!Number.isFinite(x)) return 's/d';
-          if (style.legendNoDecimals) return Math.round(x).toLocaleString('es-AR');
-          return x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
+          return style.legendNoDecimals
+            ? Math.round(x).toLocaleString('es-AR')
+            : x.toLocaleString('es-AR', { maximumFractionDigits: 1 });
         };
 
         for (let i = 0; i < breaks; i++) {
@@ -621,36 +669,56 @@ function buildRowLookup(message, dimIdx){
           const mid = (a + b) / 2;
 
           const u   = (mid - stats.min) / ((stats.max - stats.min) || 1);
-          const col = getColorFromScaleOrPalette(u, style);
+          const col = getColorFromScaleOrPalette(u, style); // ← misma función que el mapa
 
           const row = document.createElement('div');
-          row.style.display='flex'; row.style.alignItems='center'; row.style.gap='8px'; row.style.margin='2px 0';
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+          row.style.gap = '8px';
+          row.style.margin = '2px 0';
 
           const sw = document.createElement('span');
-          sw.style.display='inline-block'; sw.style.width='14px'; sw.style.height='14px';
-          sw.style.border='1px solid rgba(0,0,0,.2)'; sw.style.background=col;
+          sw.style.display = 'inline-block';
+          sw.style.width = '14px';
+          sw.style.height = '14px';
+          sw.style.border = '1px solid rgba(0,0,0,.2)';
+          sw.style.background = col;
 
           const label = document.createElement('span');
           label.textContent = `${fmt(a)} – ${fmt(b)}`;
 
-          row.appendChild(sw); row.appendChild(label); div.appendChild(row);
+          row.appendChild(sw);
+          row.appendChild(label);
+          div.appendChild(row);
         }
 
-        // Sin datos
+        // “Sin datos”
         const ndRow = document.createElement('div');
-        ndRow.style.display='flex'; ndRow.style.alignItems='center'; ndRow.style.gap='8px'; ndRow.style.margin='2px 0';
+        ndRow.style.display = 'flex';
+        ndRow.style.alignItems = 'center';
+        ndRow.style.gap = '8px';
+        ndRow.style.margin = '2px 0';
+
         const ndSw = document.createElement('span');
-        ndSw.style.display='inline-block'; ndSw.style.width='14px'; ndSw.style.height='14px';
-        ndSw.style.border='1px solid rgba(0,0,0,.2)'; ndSw.style.background = style.colorMissing;
+        ndSw.style.display = 'inline-block';
+        ndSw.style.width = '14px';
+        ndSw.style.height = '14px';
+        ndSw.style.border = '1px solid rgba(0,0,0,.2)';
+        ndSw.style.background = style.colorMissing;
+
         const ndLabel = document.createElement('span');
         ndLabel.textContent = style.legendNoDataText || 'Sin datos';
-        ndRow.appendChild(ndSw); ndRow.appendChild(ndLabel); div.appendChild(ndRow);
+
+        ndRow.appendChild(ndSw);
+        ndRow.appendChild(ndLabel);
+        div.appendChild(ndRow);
 
         return div;
       };
       legend.addTo(map);
       __leafletState.legend = legend;
-    }
+  }
+
 
     // Logo
     renderLogo(map.getContainer(), style, __leafletState);

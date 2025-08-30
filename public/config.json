@@ -55,11 +55,11 @@
             { "label": "BA Warm",         "value": "baWarm" },
             { "label": "BA Cool",         "value": "baCool" }
           ],
-          "defaultValue": "soloAmarillo"
+          "defaultValue": "viridis"
         },
         { "id": "invertScale", "label": "Invertir escala",       "type": "CHECKBOX",   "defaultValue": false },
-        { "id": "noDataColor", "label": "Color “Sin datos”",     "type": "FILL_COLOR", "defaultValue": "#d9d9d9" },
-        { "id": "opacity",     "label": "Opacidad del relleno",  "type": "NUMBER",     "defaultValue": 0.75 }
+        { "id": "noDataColor", "label": "Color “Sin datos”",     "type": "FILL_COLOR", "defaultValue": "#e0e0e0" },
+        { "id": "opacity",     "label": "Opacidad del relleno",  "type": "NUMBER",     "defaultValue": 0.85 }
       ]
     },
     {
@@ -124,10 +124,8 @@
       "id": "branding",
       "label": "Branding (opcional)",
       "elements": [
-        { "id": "logoEnabled",  "label": "Mostrar logo",              "type": "CHECKBOX",   "defaultValue": false },
-        { "id": "logoDataUrl",  "label": "Logo embebido (data: URL)", "type": "TEXTINPUT",  "defaultValue": "" },
-        { "id": "logoWidthPx",  "label": "Ancho del logo (px)",       "type": "NUMBER",     "defaultValue": 128 },
-        { "id": "logoOpacity",  "label": "Opacidad del logo",         "type": "NUMBER",     "defaultValue": 1 },
+        { "id": "logoEnabled",     "label": "Mostrar logo",              "type": "CHECKBOX",   "defaultValue": false },
+        { "id": "logoDataUrl",     "label": "Logo embebido (data: URL)", "type": "TEXTINPUT",  "defaultValue": "" },
         {
           "id": "logoPosition",
           "label": "Posición del logo",
@@ -139,7 +137,20 @@
             { "label": "Abajo der.",  "value": "bottomright" }
           ],
           "defaultValue": "bottomright"
-        }
+        },
+        {
+          "id": "logoWidthMode",
+          "label": "Modo de ancho del logo",
+          "type": "SELECT_SINGLE",
+          "options": [
+            { "label": "Pixeles",     "value": "px" },
+            { "label": "Porcentaje",  "value": "%" }
+          ],
+          "defaultValue": "px"
+        },
+        { "id": "logoWidthPx",      "label": "Ancho del logo (px)",     "type": "NUMBER",     "defaultValue": 128 },
+        { "id": "logoWidthPercent", "label": "Ancho del logo (%)",      "type": "NUMBER",     "defaultValue": 20 },
+        { "id": "logoOpacity",      "label": "Opacidad del logo",       "type": "NUMBER",     "defaultValue": 1 }
       ]
     }
   ]
