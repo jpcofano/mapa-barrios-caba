@@ -59,7 +59,8 @@
         },
         { "id": "invertScale", "label": "Invertir escala",       "type": "CHECKBOX",   "defaultValue": false },
         { "id": "noDataColor", "label": "Color “Sin datos”",     "type": "FILL_COLOR", "defaultValue": "#e0e0e0" },
-        { "id": "opacity",     "label": "Opacidad del relleno",  "type": "NUMBER",     "defaultValue": 0.85 }
+        { "id": "opacity",     "label": "Opacidad del relleno",  "type": "NUMBER",     "defaultValue": 0.85 },
+        { "id": "colorPalette", "label": "Paleta personalizada", "type": "COLOR_PALETTE", "defaultValue": [] }
       ]
     },
     {
@@ -99,8 +100,9 @@
       "label": "Etiquetas / Popup",
       "elements": [
         { "id": "showLabels",    "label": "Mostrar tooltip (hover)", "type": "CHECKBOX",  "defaultValue": true },
-        { "id": "tooltipFormat", "label": "Formato Tooltip",         "type": "TEXTINPUT", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" },
-        { "id": "popupFormat",   "label": "Formato Popup",           "type": "TEXTINPUT", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" }
+        { "id": "tooltipFormat", "label": "Formato Tooltip", "type": "TEXTAREA", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" },
+        { "id": "popupFormat",   "label": "Formato Popup",   "type": "TEXTAREA", "defaultValue": "<strong>{{nombre}}</strong><br/>Valor: {{valor}}" }
+
       ]
     },
     {

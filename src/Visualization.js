@@ -149,10 +149,38 @@ function readStyle(message) {
     return v;
   };
   const toNum = (x, def) => { const n = Number(x); return Number.isFinite(n) ? n : def; };
-  const toBool = (x, def=false) => {
+  const toBool = (x, def = false) => {
     if (typeof x === 'boolean') return x;
     if (x == null) return def;
     return String(x).toLowerCase() === 'true';
+  };
+
+  // Normaliza un color posible {color, opacity} o {value:{color}}
+  const normColor = (v, def) => {
+    if (v == null) return def;
+    if (typeof v === 'object') {
+      if ('color' in v && typeof v.color === 'string') return v.color;
+      if ('value' in v) {
+        const vv = v.value;
+        if (vv && typeof vv === 'object' && 'color' in vv) return vv.color;
+        if (typeof vv === 'string') return vv;
+      }
+    }
+    return String(v);
+  };
+
+  // Normaliza una paleta libre (COLOR_PALETTE) a array de strings hex
+  const normPalette = (arr) => {
+    if (!Array.isArray(arr)) return null;
+    const out = [];
+    for (const it of arr) {
+      if (typeof it === 'string') out.push(it);
+      else if (it && typeof it === 'object') {
+        if ('color' in it && typeof it.color === 'string') out.push(it.color);
+        else if ('value' in it && typeof it.value === 'string') out.push(it.value);
+      }
+    }
+    return out.length ? out : null;
   };
 
   return {
@@ -162,10 +190,10 @@ function readStyle(message) {
 
     // Paleta / escala
     palettePreset: g('palettePreset', 'viridis'),
-    customPalette: g('customPalette', ''),
+    customPalette: g('customPalette', ''), // si lo usás en otro lado
     colorScale: g('colorScale', 'greenToRed'),
     invertScale: toBool(g('invertScale', false)),
-    colorPalette: g('colorPalette', null), // si usás control de paleta (array de colores)
+    colorPalette: normPalette(g('colorPalette', null)), // soporta COLOR_PALETTE
 
     // Leyenda
     classCount: toNum(g('legendBreaks', g('classCount', '5')), 5), // acepta ambos ids
@@ -174,30 +202,30 @@ function readStyle(message) {
     legendPosition: g('legendPosition', 'bottomright'),
     showLegend: toBool(g('showLegend', true), true),
 
-    // Borde / relleno (mapea ambos nombres)
+    // Borde / relleno (mapea ambos nombres) — ¡colores normalizados!
     showBorders: toBool(g('showBorders', true), true),
-    borderColor: g('borderColor', g('strokeColor', '#9e9e9e')),
+    borderColor: normColor(g('borderColor', g('strokeColor', '#9e9e9e')), '#9e9e9e'),
     borderWidth: toNum(g('borderWidth', g('strokeWidth', '1')), 1),
     borderOpacity: toNum(g('borderOpacity', g('strokeOpacity', '1')), 1),
     fillOpacity: toNum(g('fillOpacity', g('opacity', '0.85')), 0.85),
 
-    // No data
-    colorMissing: g('colorMissing', g('noDataColor', '#e0e0e0')),
+    // No data — ¡color normalizado!
+    colorMissing: normColor(g('colorMissing', g('noDataColor', '#e0e0e0')), '#e0e0e0'),
 
     // Categorización (opcional)
     categoryMode: toBool(g('categoryMode', false), false),
-    cat1Value: toNum(g('cat1Value','1'), 1),
-    cat2Value: toNum(g('cat2Value','2'), 2),
-    cat3Value: toNum(g('cat3Value','3'), 3),
-    cat1Color: g('cat1Color','#1b9e77'),
-    cat2Color: g('cat2Color','#d95f02'),
-    cat3Color: g('cat3Color','#7570b3'),
-    categoryOtherColor: g('categoryOtherColor','#bdbdbd'),
+    cat1Value: toNum(g('cat1Value', '1'), 1),
+    cat2Value: toNum(g('cat2Value', '2'), 2),
+    cat3Value: toNum(g('cat3Value', '3'), 3),
+    cat1Color: normColor(g('cat1Color', '#1b9e77'), '#1b9e77'),
+    cat2Color: normColor(g('cat2Color', '#d95f02'), '#d95f02'),
+    cat3Color: normColor(g('cat3Color', '#7570b3'), '#7570b3'),
+    categoryOtherColor: normColor(g('categoryOtherColor', '#bdbdbd'), '#bdbdbd'),
 
     // Tooltip & Popup
     showLabels: toBool(g('showLabels', true), true),
-    tooltipFormat: g('tooltipFormat', g('tooltipTemplate','<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
-    popupFormat:   g('popupFormat',   g('popupTemplate',  '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+    tooltipFormat: g('tooltipFormat', g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+    popupFormat: g('popupFormat', g('popupTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
 
     // Logo / branding
     logoEnabled: toBool(g('logoEnabled', false), false),
@@ -206,36 +234,110 @@ function readStyle(message) {
     logoWidthMode: g('logoWidthMode', 'px'), // 'px' | '%'
     logoWidthPx: toNum(g('logoWidthPx', '160'), 160),
     logoWidthPercent: toNum(g('logoWidthPercent', '20'), 20),
-    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9),
+    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9)
   };
 }
 
+
   /* --------------- Índices DIM/MET: ignorar param_nivel ----------------- */
-  function resolveIndices(message){
-    const H = message?.tables?.DEFAULT?.headers || [];
-    let dim = -1, metric = -1;
+function readStyle(message) {
+  const s = (message && (message.styleById || message.style)) || {};
+  const g = (key, def) => {
+    const v = s[key];
+    if (v == null) return def;
+    if (typeof v === 'object' && 'value' in v) return v.value;
+    return v;
+  };
+  const toNum = (x, def) => { const n = Number(x); return Number.isFinite(n) ? n : def; };
+  const toBool = (x, def = false) => {
+    if (typeof x === 'boolean') return x;
+    if (x == null) return def;
+    return String(x).toLowerCase() === 'true';
+  };
 
-    for (let i = 0; i < H.length; i++){
-      const h  = H[i] || {};
-      const nm = (h.name || '').toString().toLowerCase();
-      const id = (h.id   || '').toString().toLowerCase();
-
-      const isParamNivel = id.includes('param_nivel') || nm.includes('param_nivel');
-      if (isParamNivel) continue;
-
-      if (dim === -1 && (h.type === 'DIMENSION' || /barrio|comuna|nombre/.test(nm))) dim = i;
-      if (metric === -1 && (h.type === 'METRIC'    || /asistent|total|valor|métric|metric/.test(nm))) metric = i;
-
-      if (id.includes('geodimension')) dim = i;
-      if (id.includes('metricprimary')) metric = i;
+  // Normaliza un color posible {color, opacity} o {value:{color}}
+  const normColor = (v, def) => {
+    if (v == null) return def;
+    if (typeof v === 'object') {
+      if ('color' in v && typeof v.color === 'string') return v.color;
+      if ('value' in v) {
+        const vv = v.value;
+        if (vv && typeof vv === 'object' && 'color' in vv) return vv.color;
+        if (typeof vv === 'string') return vv;
+      }
     }
+    return String(v);
+  };
 
-    if (dim === -1) dim = 0;
-    if (metric === -1 && H.length > 1) metric = 1;
+  // Normaliza una paleta libre (COLOR_PALETTE) a array de strings hex
+  const normPalette = (arr) => {
+    if (!Array.isArray(arr)) return null;
+    const out = [];
+    for (const it of arr) {
+      if (typeof it === 'string') out.push(it);
+      else if (it && typeof it === 'object') {
+        if ('color' in it && typeof it.color === 'string') out.push(it.color);
+        else if ('value' in it && typeof it.value === 'string') out.push(it.value);
+      }
+    }
+    return out.length ? out : null;
+  };
 
-    if (DEBUG) console.log('[resolveIndices] dim:', dim, 'metric:', metric, 'headers:', H);
-    return { dim, metric, headers: H };
-  }
+  return {
+    // Geografía
+    nivelJerarquia: g('nivelJerarquia', 'barrio'),
+    geojsonProperty: g('geojsonProperty', ''),
+
+    // Paleta / escala
+    palettePreset: g('palettePreset', 'viridis'),
+    customPalette: g('customPalette', ''), // si lo usás en otro lado
+    colorScale: g('colorScale', 'greenToRed'),
+    invertScale: toBool(g('invertScale', false)),
+    colorPalette: normPalette(g('colorPalette', null)), // soporta COLOR_PALETTE
+
+    // Leyenda
+    classCount: toNum(g('legendBreaks', g('classCount', '5')), 5), // acepta ambos ids
+    legendNoDecimals: toBool(g('legendNoDecimals', true), true),
+    legendNoDataText: g('legendNoDataText', 'Sin datos'),
+    legendPosition: g('legendPosition', 'bottomright'),
+    showLegend: toBool(g('showLegend', true), true),
+
+    // Borde / relleno (mapea ambos nombres) — ¡colores normalizados!
+    showBorders: toBool(g('showBorders', true), true),
+    borderColor: normColor(g('borderColor', g('strokeColor', '#9e9e9e')), '#9e9e9e'),
+    borderWidth: toNum(g('borderWidth', g('strokeWidth', '1')), 1),
+    borderOpacity: toNum(g('borderOpacity', g('strokeOpacity', '1')), 1),
+    fillOpacity: toNum(g('fillOpacity', g('opacity', '0.85')), 0.85),
+
+    // No data — ¡color normalizado!
+    colorMissing: normColor(g('colorMissing', g('noDataColor', '#e0e0e0')), '#e0e0e0'),
+
+    // Categorización (opcional)
+    categoryMode: toBool(g('categoryMode', false), false),
+    cat1Value: toNum(g('cat1Value', '1'), 1),
+    cat2Value: toNum(g('cat2Value', '2'), 2),
+    cat3Value: toNum(g('cat3Value', '3'), 3),
+    cat1Color: normColor(g('cat1Color', '#1b9e77'), '#1b9e77'),
+    cat2Color: normColor(g('cat2Color', '#d95f02'), '#d95f02'),
+    cat3Color: normColor(g('cat3Color', '#7570b3'), '#7570b3'),
+    categoryOtherColor: normColor(g('categoryOtherColor', '#bdbdbd'), '#bdbdbd'),
+
+    // Tooltip & Popup
+    showLabels: toBool(g('showLabels', true), true),
+    tooltipFormat: g('tooltipFormat', g('tooltipTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+    popupFormat: g('popupFormat', g('popupTemplate', '<strong>{{nombre}}</strong><br/>Valor: {{valor}}')),
+
+    // Logo / branding
+    logoEnabled: toBool(g('logoEnabled', false), false),
+    logoDataUrl: g('logoDataUrl', ''),
+    logoPosition: g('logoPosition', 'bottomleft'),
+    logoWidthMode: g('logoWidthMode', 'px'), // 'px' | '%'
+    logoWidthPx: toNum(g('logoWidthPx', '160'), 160),
+    logoWidthPercent: toNum(g('logoWidthPercent', '20'), 20),
+    logoOpacity: toNum(g('logoOpacity', '0.9'), 0.9)
+  };
+}
+
 
   /* -------------------- Feature keys / nombres --------------------------- */
   function canonicalKey(str){
@@ -783,7 +885,6 @@ async function waitForDsccWithBackoff(maxMs = 5000) {
   return null;
 }
 
-// === INIT / SUBSCRIBE ===
 async function initWrapper(attempt = 1) {
   try {
     const MAX_ATTEMPTS = 6;
@@ -792,13 +893,8 @@ async function initWrapper(attempt = 1) {
       return;
     }
 
-    // Intento tomar dscc del host; si no, lo cargo y espero
-    let d = (window.dscc && typeof window.dscc.subscribeToData === 'function') ? window.dscc : null;
-    if (!d) {
-      ensureDsccScript();                        // carga el bundle si falta
-      d = await waitForDsccWithBackoff(5000);    // espera con backoff
-    }
-
+    // Esperar dscc del host; nada de cargar scripts externos (CSP)
+    const d = await waitForDscc();
     if (d && typeof d.subscribeToData === 'function') {
       if (DEBUG) console.log('[Viz] dscc listo');
 
@@ -813,7 +909,7 @@ async function initWrapper(attempt = 1) {
         }
       }, { transform: d.objectTransform });
 
-      try { tapTableTransform(d); } catch {}  // opcional (debug tableTransform)
+      try { tapTableTransform(d); } catch {}
       window.__VIZ_SUBSCRIBED = true;
       return;
     }
@@ -828,6 +924,7 @@ async function initWrapper(attempt = 1) {
     console.error('[Viz] Error initWrapper:', e);
   }
 }
+
 
 // === BOOT ===
 if (document.readyState === 'loading') {
